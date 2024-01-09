@@ -38,13 +38,14 @@ tidy_books %>%
 # - counting number of negative words
 # - take difference
 
-jane_austen_sentiment <- tidy_books %>%
-  inner_join(get_sentiments("bing")) %>%
-  count(book, index = linenumber %/% 80, sentiment) %>%
-  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
-  mutate(sentiment = positive - negative)
+jane_austen_sentiment <- tidy_books %>% # Take 'tidy_books' data which has each word individually
+  inner_join(get_sentiments("bing")) %>% # include only words that are also part of dictionary "bing"
+  count(book, index = linenumber %/% 80, sentiment) %>% # Counts for each book, each 80-line paragraph and both sentiments the number of words associated to each sentiment
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% #transforms table so each row is a 80-line paragraph within a book
+  mutate(sentiment = positive - negative) # calculates sentiment index
 
 # plot sentiment scores across plot trajectories
 ggplot(jane_austen_sentiment, aes(index, sentiment, fill = book)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~book, ncol = 2, scales = "free_x")
+# Plots development of overall sentiment for each 80-line paragraph for each book

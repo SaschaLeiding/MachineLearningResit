@@ -18,19 +18,19 @@ glimpse(trump_tweets_df)
 # Trump tweeted from Android phone
 # staffers tweeted from iPhone
 # extract "source" (i.e. type of phone) from html code
-tweets <- trump_tweets_df |>
-  select(.id = id,
+tweets <- trump_tweets_df |> # Select trump data
+  select(.id = id, # Select only specific variables
          .source = statusSource,
          .text = text,
          .created = created) |>
-  extract(.source, '.source', "Twitter for (.*?)<") |>
-  filter(.source %in% c('iPhone', 'Android')) |>
-  mutate(.source = factor(.source))
+  extract(.source, '.source', "Twitter for (.*?)<") |> # Extract source (Iphone, Adnroid or NA)
+  filter(.source %in% c('iPhone', 'Android')) |> # Drop source NA
+  mutate(.source = factor(.source)) # transform source to factor format
 
 # plot percentage of tweets by hour of day and source
 tweets |>
-  count(.source, hour = hour(with_tz(.created, "EST"))) |>
-  mutate(percent = n / sum(n)) |>
+  count(.source, hour = hour(with_tz(.created, "EST"))) |> # counts number of tweets per source(iphone or Android) per hour of day
+  mutate(percent = n / sum(n)) |> # calculates share of number of tweets in total not by source
   ggplot(aes(hour, percent, color = .source)) +
   geom_line() +
   scale_y_continuous(labels = percent_format()) +
@@ -42,14 +42,14 @@ tweets |>
 
 # pick the words to keep as predictors
 words_to_keep <- tweets |>
-  unnest_tokens(input = '.text',
+  unnest_tokens(input = '.text', # Split tweets from '.text' column into individual tokens in 'word' column
                 output = 'word') |>
-  anti_join(get_stopwords()) |>
-  count(word) |>
-  filter(str_detect(word, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |>
-  filter(str_detect(word, '[0-9]', negate = TRUE)) |>
-  filter(n > 2) |>
-  pull(word)
+  anti_join(get_stopwords()) |> # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
+  count(word) |> # counts each individual word
+  filter(str_detect(word, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
+  filter(str_detect(word, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
+  filter(n > 2) |> # take only words that occur more than two times
+  pull(word) # extract the column word as vector
 
 
 tidy_tweets <- tweets |>
