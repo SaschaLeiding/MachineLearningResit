@@ -10,7 +10,7 @@ library(ggplot2)
 # load data of news articles from the Associated Press
 data("AssociatedPress")
 
-# fit an LDA model wiht 10 topics
+# fit an LDA model with 10 topics
 AP_topic_model <- LDA(AssociatedPress, k=10, control = list(seed = 321))
 
 # obtain the topic-specific probability vectors theta_1,...,theta_K

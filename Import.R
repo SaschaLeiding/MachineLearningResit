@@ -32,5 +32,26 @@ to age 50.
 
 # Load Data
 {
-  df_politicians <- load("./Data/politicians.rdata")
+  load("./Data/politicians.rdata")
 }
+
+# Old speech counter
+{
+  speech_count <- str_count(politicians$allspeeches, "\\t House of Commons Hansard Debates for ") + 1
+  data_split <- politicians %>%
+    # separate speeches of a speaker
+    separate(col = allspeeches,
+             into = paste0("speech", 1:max(speech_count)),
+             sep = "\\t House of Commons Hansard Debates for ",
+             fill = "right") %>%
+    pivot_longer(cols = starts_with("speech"),
+                 names_to = "speech_number",
+                 values_to = "speech_text",
+                 values_drop_na = TRUE) %>%
+    mutate(speech_number = parse_number(speech_number))
+}
+
+# Counting number of speeches per speaker
+data <- politicians %>%
+  mutate(number_speeches = str_count(allspeeches, "\\t House of Commons Hansard Debates for ") + 1)
+  

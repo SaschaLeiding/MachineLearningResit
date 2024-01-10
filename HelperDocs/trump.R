@@ -53,15 +53,17 @@ words_to_keep <- tweets |>
 
 
 tidy_tweets <- tweets |>
-  unnest_tokens(input = '.text',
+  unnest_tokens(input = '.text', # Split tweets from '.text' column into individual tokens in 'word' column
                 output = 'word') |>
-  filter(word %in% words_to_keep) |>
-  count(.id, word) |>
-  # compute term frequencies
-  bind_tf_idf(term = 'word',
-              document = '.id',
-              n = 'n') |>
-  select(.id, word, tf) |>
+  filter(word %in% words_to_keep) |> # Take only words that are in previous created list
+  count(.id, word) |> # count per tweet, identified through '.id' the number of a word occuring 
+  
+  # compute term frequencies 
+  # Bind the term frequency and inverse document frequency of the data to the dataset
+  bind_tf_idf(term = 'word', # Column containing terms as string or symbol
+              document = '.id', # Column containing document IDs as string or symbol
+              n = 'n') |> # Column containing document-term counts as string or symbol
+  select(.id, word, tf) |> # select ID, word and term-frequency column
   # pivot wider into a document-term matrix
   pivot_wider(id_cols = '.id',
               names_from = 'word',
@@ -73,11 +75,11 @@ tidy_tweets <- tweets |>
   select(.id, .source, .created) |>
   right_join(tidy_tweets, by = '.id')
 
-dim(tidy_tweets)
+dim(tidy_tweets) # 1382 tweets with in total 1034 words
 
 
 # split sample into traininig and test sample
-tweet_split <- initial_split(tidy_tweets, prop = 0.8)
+tweet_split <- initial_split(tidy_tweets, prop = 0.8) # split into 80% training and 20% test
 
 train <- training(tweet_split)
 test <- testing(tweet_split)
