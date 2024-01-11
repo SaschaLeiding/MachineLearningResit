@@ -79,12 +79,20 @@ to age 50.
 
 # Mutate and Tidy data
 {
-  colnames(politicians)[which(names(politicians) == "speaker")] <- 'id_speaker'
+  new_colnames <- paste0(".", colnames(politicians))
+  colnames(politicians) <- new_colnames
+  
   data <- politicians %>% # Select Data Politicians as base
     # More or Less vocal politicians could indicate party affiliation
-    mutate(number_speeches = str_count(allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
-           birthplace = as.factor(birthplace), # Transform birthplace to factor or categorical variable as higher or lower values have no ranking
-           party = as.factor(party))# Transform party affiliation to factor
+    mutate(number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
+           .birthplace = as.factor(.birthplace), # Transform birthplace to factor or categorical variable as higher or lower values have no ranking
+           .party = as.factor(.party))# Transform party affiliation to factor
+  
+  # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
+  data_unnested <- data %>%
+    unnest_tokens(.word, .allspeeches)
+  
+  rm(politicians)
 }
 
 # Get overall Sentiment per speaker
@@ -94,15 +102,14 @@ to age 50.
   word alterations
   "
   sentiment_dict <- get_sentiments("bing")
-  sentiment <- politicians %>%
-    unnest_tokens(word, allspeeches) %>% # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
-    inner_join(sentiment_dict, relationship = "many-to-many", by = join_by(word)) %>% # include only words that are part of the defined sentiment dictionary
-    count(id_speaker, sentiment) %>% # Counts for each speaker and both sentiments the number of words associated to each sentiment
+  sentiment <- data_unnested %>% 
+    inner_join(sentiment_dict, relationship = "many-to-many", join_by(.word == word)) %>% # include only words that are part of the defined sentiment dictionary
+    count(.speaker, sentiment) %>% # Counts for each speaker and both sentiments the number of words associated to each sentiment
     pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% #transforms table so each row is a speaker again
     # Mutate Command works only for 'bing' dictionary 
-    mutate(sentiment = positive - negative) # calculate overall sentiment index
+    mutate(.sentiment = positive - negative) # calculate overall sentiment index
   
-  data <- data %>% left_join(sentiment, join_by(id_speaker == id_speaker))
+  data <- data %>% left_join(sentiment, join_by(.speaker == .speaker))
 }
 
 # Plot overall Sentiment
@@ -122,9 +129,8 @@ to age 50.
 {
   # pick the words to keep as predictors
   {
-    words_to_keep <- politicians %>%
-      unnest_tokens(word, allspeeches) %>% # Split word from 'allspeeches' column into individual tokens in 'word' column
-      anti_join(get_stopwords()) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
+    words_to_keep <- data_unnested %>%
+      anti_join(get_stopwords(), by = join_by(word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
       count(word) %>% # counts each individual word
       
       # is first filter necessary?
@@ -138,9 +144,7 @@ to age 50.
 
   # Construct Term Frequencies
   {
-    # Count occurence of Words
-    tidy_speech <- politicians |>
-      unnest_tokens(word, allspeeches) %>% # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
+    tidy_speech <- data_unnested %>%
       filter(word %in% words_to_keep) |> # Take only words that are in previous created list
       count(id_speaker, word) |> # count per tweet, identified through '.id' the number of a word occuring
       # Bind the term frequency and inverse document frequency of the data to the dataset
@@ -153,6 +157,13 @@ to age 50.
                   names_from = word,
                   values_from = tf,
                   values_fill = 0)
+  }
+  
+  # Join Term Frequency with dataset
+  {
+    tidy_speech <- data %>%
+      select(id_speaker:income) %>%
+      right_join(tidy_speech, by = 'id_speaker')
   }
 }
   
