@@ -26,8 +26,10 @@ to age 50.
 # Install & Load Packages
 {
   #install.packages("tidyverse")
+  #install.packages("tidytext")
   
   library(tidyverse)
+  library(tidytext)
 }
 
 # Load Data
@@ -51,7 +53,47 @@ to age 50.
     mutate(speech_number = parse_number(speech_number))
 }
 
-# Counting number of speeches per speaker
-data <- politicians %>%
-  mutate(number_speeches = str_count(allspeeches, "\\t House of Commons Hansard Debates for ") + 1)
+# Get quick overview of data
+{
+  summary(politicians)
+  "
+  - age between 35 and 70 with mean of 47.33
+  - 23 birthplaces
+  - corruption index between -2.633 and 3.292 with mean of 0
+  - income between 52,231 and 532,325 with mean of 112,303
+  "
+  
+  # Plot variable by Party association
+  plot_test <- ggplot(data = (politicians %>% mutate(income = log(income))), 
+                      aes(x = income, y = corrindex, color = party, group = party)) +
+    geom_point()
+  plot_test
+  
+  "
+  Plot indicates that for both parties there is a positive correlation between
+  corrupt behavior and income, thus more corrupt behavior indicates higher income.
+  Slightly indicates that individuals associated to party B have less corrupt
+  behavior
+  "
+}
+
+# Mutate and Tidy data
+{
+  data <- politicians %>% # Select Data Politicians as base
+    # More or Less vocal politicians could indicate party affiliation
+    mutate(number_speeches = str_count(allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
+           birthplace = as.factor(birthplace))# Transform birthplace to factor or categorical variable as higher or lower values have no ranking
+}
+
+# Get overall Sentiment per speaker
+{
+  sentiment_dict <- get_sentiments("bing")
+  sentiment <- politicians %>%
+    unnest_tokens(word, allspeeches) %>% # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
+    inner_join(sentiment_dict, relationship = "many-to-many") %>% # include only words that are part of the defined sentiment dictionary
+    count(speaker, sentiment) %>% # Counts for each speaker and both sentiments the number of words associated to each sentiment
+    pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% #transforms table so each row is a 80-line paragraph within a book
+    mutate(sentiment = positive - negative) # calculates sentiment index
+}
+
   
