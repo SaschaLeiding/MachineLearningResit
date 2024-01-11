@@ -87,13 +87,27 @@ to age 50.
 
 # Get overall Sentiment per speaker
 {
+  "
+  when using dictionary 'bing no need to filter out the stem as it contains all
+  word alterations
+  "
   sentiment_dict <- get_sentiments("bing")
   sentiment <- politicians %>%
     unnest_tokens(word, allspeeches) %>% # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
-    inner_join(sentiment_dict, relationship = "many-to-many") %>% # include only words that are part of the defined sentiment dictionary
+    inner_join(sentiment_dict, relationship = "many-to-many", by = join_by(word)) %>% # include only words that are part of the defined sentiment dictionary
     count(speaker, sentiment) %>% # Counts for each speaker and both sentiments the number of words associated to each sentiment
-    pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% #transforms table so each row is a 80-line paragraph within a book
-    mutate(sentiment = positive - negative) # calculates sentiment index
+    pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% #transforms table so each row is a speaker again
+    # Mutate Command works only for 'bing' dictionary 
+    mutate(sentiment = positive - negative) # calculate overall sentiment index
+  
+  data <- data %>% left_join(sentiment, join_by(speaker == speaker))
 }
 
+# Plot Sentiment
+{
+  plot_sentiment <- ggplot(data = (data %>% mutate(income = log(income))),
+                           aes(x=income, y = sentiment, color = party, group = party)) +
+    geom_point()
+  plot_sentiment
+}
   
