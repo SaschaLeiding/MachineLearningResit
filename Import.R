@@ -23,6 +23,25 @@ more likely to engage in corrupt behavior at some point during their political c
 to age 50.
 "
 
+# OLD CODE
+{
+  # Old speech counter
+  {
+    speech_count <- str_count(politicians$allspeeches, "\\t House of Commons Hansard Debates for ") + 1
+    data_split <- politicians %>%
+      # separate speeches of a speaker
+      separate(col = allspeeches,
+               into = paste0("speech", 1:max(speech_count)),
+               sep = "\\t House of Commons Hansard Debates for ",
+               fill = "right") %>%
+      pivot_longer(cols = starts_with("speech"),
+                   names_to = "speech_number",
+                   values_to = "speech_text",
+                   values_drop_na = TRUE) %>%
+      mutate(speech_number = parse_number(speech_number))
+  }
+}
+
 # Install & Load Packages
 {
   #install.packages("tidyverse")
@@ -37,22 +56,6 @@ to age 50.
 # Load Data
 {
   load("./Data/politicians.rdata")
-}
-
-# Old speech counter
-{
-  speech_count <- str_count(politicians$allspeeches, "\\t House of Commons Hansard Debates for ") + 1
-  data_split <- politicians %>%
-    # separate speeches of a speaker
-    separate(col = allspeeches,
-             into = paste0("speech", 1:max(speech_count)),
-             sep = "\\t House of Commons Hansard Debates for ",
-             fill = "right") %>%
-    pivot_longer(cols = starts_with("speech"),
-                 names_to = "speech_number",
-                 values_to = "speech_text",
-                 values_drop_na = TRUE) %>%
-    mutate(speech_number = parse_number(speech_number))
 }
 
 # Get quick overview of data
@@ -132,6 +135,7 @@ to age 50.
 
 # 'trump.R'
 {
+  set.seed(12345)
   # pick the words to keep as predictors
   {
     words_to_keep <- data_unnested %>%
@@ -187,25 +191,21 @@ to age 50.
     # (1) Simple Model
     
     
-    # (2) Complex Model
+    # (2) Complex Model - Overfitting
     # Linear Regression with all words
     model_comp_corr <- linear_reg () %>%
       fit(formula = .corrindex ~ .,
           data = train %>% select(-.speaker))
+
+    # Plot in-sample Fit
+    plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, train))),
+                                 aes(x = .pred, y = .corrindex)) + geom_point()
+    plot_fit_comp_corr_in 
     
-    # Turn the linear regression model into a tidy tibble
-    tidy(model_comp_corr)
-    
-    # in-sample fit: percentage of correct predictions
-    x <- train %>%
-      bind_cols(predict(model_comp_corr, train)) %>%
-      accuracy(truth = .corrindex, estimate = .pred) 
-    
-    # out-of-sample fit: number of correct and false predictions
-    test |>
-      bind_cols(predict(model_comp_corr, test)) |>
-      conf_mat(truth = .corrindex, estimate = .pred_class) |>
-      autoplot(type = 'heatmap')
+    # Plot out-of-sample fit
+    plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
+                                 aes(x = .pred, y = .corrindex)) +  geom_point()
+    plot_fit_comp_corr_out
     
     
     # (3) Regularized Model - LASSO

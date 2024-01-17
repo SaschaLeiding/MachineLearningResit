@@ -153,6 +153,7 @@ test |>
   conf_mat(truth = .source, estimate = .pred_class) |>
   autoplot(type = 'heatmap')
 
+
 # plot words most strongly related to Trump
 tidy(model3) |> 
   filter(estimate < -10) |> 
