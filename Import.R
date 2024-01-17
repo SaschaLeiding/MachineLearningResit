@@ -27,9 +27,11 @@ to age 50.
 {
   #install.packages("tidyverse")
   #install.packages("tidytext")
+  #install.packages("tidymodels")
   
   library(tidyverse)
   library(tidytext)
+  library(tidymodels)
 }
 
 # Load Data
@@ -84,9 +86,10 @@ to age 50.
   
   data <- politicians %>% # Select Data Politicians as base
     # More or Less vocal politicians could indicate party affiliation
-    mutate(number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
+    mutate(.number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
            .birthplace = as.factor(.birthplace), # Transform birthplace to factor or categorical variable as higher or lower values have no ranking
-           .party = as.factor(.party))# Transform party affiliation to factor
+           .party = as.factor(.party), # Transform party affiliation to factor
+           .logincome = log(.income))
   
   # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
   data_unnested <- data %>%
@@ -107,54 +110,56 @@ to age 50.
     count(.speaker, sentiment) %>% # Counts for each speaker and both sentiments the number of words associated to each sentiment
     pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% #transforms table so each row is a speaker again
     # Mutate Command works only for 'bing' dictionary 
-    mutate(.sentiment = positive - negative) # calculate overall sentiment index
+    mutate(.sentiment = positive - negative) %>% # calculate overall sentiment index
+    rename(.positive = positive,
+           .negative = negative)
   
   data <- data %>% left_join(sentiment, join_by(.speaker == .speaker))
 }
 
 # Plot overall Sentiment
 {
-  plot_sentiment_inc <- ggplot(data = (data %>% mutate(income = log(income))),
-                           aes(x=sentiment, y = income, color = party, group = party)) +
+  plot_sentiment_inc <- ggplot(data = data,
+                           aes(x=.sentiment, y = .logincome, color = .party, group = .party)) +
     geom_point()
   plot_sentiment_inc
   
   plot_sentiment_corr <- ggplot(data = data,
-                               aes(x=sentiment, y = corrindex, color = party, group = party)) +
+                               aes(x=.sentiment, y = .corrindex, color = .party, group = .party)) +
     geom_point()
   plot_sentiment_corr
 }
 
-# 
+# 'trump.R'
 {
   # pick the words to keep as predictors
   {
     words_to_keep <- data_unnested %>%
-      anti_join(get_stopwords(), by = join_by(word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
-      count(word) %>% # counts each individual word
+      anti_join(get_stopwords(), join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
+      count(.word) %>% # counts each individual word
       
       # is first filter necessary?
-      filter(str_detect(word, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
-      filter(str_detect(word, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
+      filter(str_detect(.word, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
+      filter(str_detect(.word, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
       
       # How do I justify the value of 2?
       filter(n > 2) |> # take only words that occur more than two times
-      pull(word) # extract the column word as vector
+      pull(.word) # extract the column word as vector
   }
 
   # Construct Term Frequencies
   {
     tidy_speech <- data_unnested %>%
-      filter(word %in% words_to_keep) |> # Take only words that are in previous created list
-      count(id_speaker, word) |> # count per tweet, identified through '.id' the number of a word occuring
+      filter(.word %in% words_to_keep) |> # Take only words that are in previous created list
+      count(.speaker, .word) |> # count per tweet, identified through '.id' the number of a word occuring
       # Bind the term frequency and inverse document frequency of the data to the dataset
-      bind_tf_idf(term = 'word', # Column containing terms as string or symbol
-                  document = 'id_speaker', # Column containing document IDs as string or symbol
+      bind_tf_idf(term = '.word', # Column containing terms as string or symbol
+                  document = '.speaker', # Column containing document IDs as string or symbol
                   n = 'n') |> # Column containing document-term counts as string or symbol
-      select(id_speaker, word, tf) |> # select ID, word and term-frequency column
+      select(.speaker, .word, tf) |> # select ID, word and term-frequency column
       # pivot wider into a document-term matrix
-      pivot_wider(id_cols = id_speaker,
-                  names_from = word,
+      pivot_wider(id_cols = .speaker,
+                  names_from = .word,
                   values_from = tf,
                   values_fill = 0)
   }
@@ -162,8 +167,49 @@ to age 50.
   # Join Term Frequency with dataset
   {
     tidy_speech <- data %>%
-      select(id_speaker:income) %>%
-      right_join(tidy_speech, by = 'id_speaker')
+      select(!c(".allspeeches")) %>%
+      right_join(tidy_speech, by = '.speaker') %>%
+      ungroup()
+  }
+  
+  # Create train and test sample from data merge with Term Frequency
+  # NEED TO JUSTIFY 08. - 0.2 division
+  {
+    # split sample into training and test sample
+    data_split <- initial_split(tidy_speech, prop = 0.8) # split into 80% training and 20% test
+    
+    train <- training(data_split)
+    test <- testing(data_split)
+  }
+  
+  # Create Model with corruption index as outcome variable
+  {
+    # (1) Simple Model
+    
+    
+    # (2) Complex Model
+    # Linear Regression with all words
+    model_comp_corr <- linear_reg () %>%
+      fit(formula = .corrindex ~ .,
+          data = train %>% select(-.speaker))
+    
+    # Turn the linear regression model into a tidy tibble
+    tidy(model_comp_corr)
+    
+    # in-sample fit: percentage of correct predictions
+    x <- train %>%
+      bind_cols(predict(model_comp_corr, train)) %>%
+      accuracy(truth = .corrindex, estimate = .pred) 
+    
+    # out-of-sample fit: number of correct and false predictions
+    test |>
+      bind_cols(predict(model_comp_corr, test)) |>
+      conf_mat(truth = .corrindex, estimate = .pred_class) |>
+      autoplot(type = 'heatmap')
+    
+    
+    # (3) Regularized Model - LASSO
+    
   }
 }
   
