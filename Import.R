@@ -57,9 +57,9 @@ Task:
   - Categorical value, as values from 1 to 23 have no meaning, ranking etc,
     except lower values indicate rather type A and higher values rather type B
     affiliation with region, BUT only more or less
-  - construct var. for dominance of a party, where values all positive, no distinguishing between A & B, 
-      the higher the values the more dominated a region is by a party
-  - construct var. for political direction of a region, e.g. -3 mostly party A, 3 mostly party B speaker
+DONE  - construct var. for dominance of a party, where values all positive, no distinguishing between A & B, 
+      the higher the values the less dominated a region is by a party, thus the more intense potential campaigns
+DONE  - construct var. for political direction of a region, e.g. 3 mostly party A, -3 mostly party B speaker
 "}
 
 # OLD CODE
@@ -86,7 +86,7 @@ Task:
   #install.packages("tidyverse")
   #install.packages("tidytext")
   #install.packages("tidymodels")
-  install.packages("glmnetUtils")
+  #install.packages("glmnetUtils")
   library(glmnetUtils)
   
   library(tidyverse)
@@ -110,17 +110,32 @@ Task:
   "
   
   # Plot variable by Party association
-  plot_outcome <- ggplot(data = (politicians %>% mutate(income = log(income))), 
-                      aes(x = income, y = corrindex, color = party, group = party)) +
-    geom_point()
-  print(plot_outcome)
-  
-  "
+  {
+    plot_outcome <- ggplot(data = (politicians %>% mutate(income = log(income))), 
+                           aes(x = income, y = corrindex, color = party, group = party)) +
+      geom_point()
+    print(plot_outcome)
+    
+    "
   Plot indicates that for both parties there is a positive correlation between
   corrupt behavior and income, thus more corrupt behavior indicates higher income.
   Slightly indicates that individuals associated to party B have less corrupt
   behavior
   "
+  }
+  
+  # Plot Birthplace and Party Affiliation
+  {
+    plot_birthplace <- ggplot(data = politicians, aes(x = party, fill = party)) +
+      geom_bar(position = "dodge") +
+      facet_wrap(~birthplace, scales = "free_x", ncol = 3) +
+      labs(title = "Speakers by Party and Birthplace",
+           x = "Party",
+           y = "Number of Speakers") +
+      theme_minimal()
+    
+    print(plot_birthplace)
+  }
 }
 
 # Mutate and Tidy data
@@ -135,7 +150,12 @@ Task:
            .speechlength = .number_words/.number_speeches, # calc. average length of speech
            .birthplace = as.factor(.birthplace), # Transform birthplace to factor or categorical variable as higher or lower values have no ranking
            .party = as.factor(.party), # Transform party affiliation to factor
-           .logincome = log(.income)) # Transform income into log
+           .logincome = log(.income)) %>% # Transform income into log
+    group_by(.birthplace) %>%
+    # ASSUMPTION: all politicians within a birthplace are included in the data, or distribution and choice of entries are representative for a region
+    mutate(.regionideology = sum(.party == 'A') - sum(.party == 'B'), # Identify Ideological tendence for each region
+           .regionintensity = 1 - sum(.party == ifelse(sum(.party == 'A') > sum(.party == 'B'), 'A', 'B')) / n())  %>% # Identify the more prevalent party and calculate the ratio
+    ungroup()
   
   # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
   data_unnested <- data %>%
@@ -282,17 +302,5 @@ Task:
  
 # Use Birthplace as IV
 {
-  # Plot Birthplace and Party Affiliation
-  # NEED TO CHANGE DATA used for PLOT
-  {
-    plot_birthplace <- ggplot(data = politicians, aes(x = party, fill = party)) +
-      geom_bar(position = "dodge") +
-      facet_wrap(~birthplace, scales = "free_x", ncol = 3) +
-      labs(title = "Speakers by Party and Birthplace",
-           x = "Party",
-           y = "Number of Speakers") +
-      theme_minimal()
-    
-    print(plot_birthplace)
-  }
+  
 }
