@@ -45,11 +45,21 @@ Task:
   => as in (a) & (b) and with INTERACTION terms of PARTY with CONFOUNDERS
   
   Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN
-  (i) .number_speeches = How Vocal is politician
-  (ii) .speechlength = avg. length of speech
+  DONE (i) .number_speeches = How Vocal is politician
+  DONE (ii) .speechlength = avg. length of speech
   (iii) generality = how many basic terms per speech
   (iv) content = TOPIC MODELLING by various indizes
     -> may need to transform numerical corrindex and income into categorical
+    
+  Birthplace:
+  - number indicating the region a speaker was born in
+  => How to deal with it?
+  - Categorical value, as values from 1 to 23 have no meaning, ranking etc,
+    except lower values indicate rather type A and higher values rather type B
+    affiliation with region, BUT only more or less
+  - construct var. for dominance of a party, where values all positive, no distinguishing between A & B, 
+      the higher the values the more dominated a region is by a party
+  - construct var. for political direction of a region, e.g. -3 mostly party A, 3 mostly party B speaker
 "}
 
 # OLD CODE
@@ -269,4 +279,20 @@ Task:
     }
   }
 }
-  
+ 
+# Use Birthplace as IV
+{
+  # Plot Birthplace and Party Affiliation
+  # NEED TO CHANGE DATA used for PLOT
+  {
+    plot_birthplace <- ggplot(data = politicians, aes(x = party, fill = party)) +
+      geom_bar(position = "dodge") +
+      facet_wrap(~birthplace, scales = "free_x", ncol = 3) +
+      labs(title = "Speakers by Party and Birthplace",
+           x = "Party",
+           y = "Number of Speakers") +
+      theme_minimal()
+    
+    print(plot_birthplace)
+  }
+}
