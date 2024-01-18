@@ -21,7 +21,36 @@ more likely to engage in corrupt behavior at some point during their political c
 
 2. The variable income measures average annual income of the politician from age 40
 to age 50.
+
+Task:
+- To which extent does PARTY AFFILIATIOn affect CORRUPTION and INCOME
+-> causal effect of PARTY AFFILIATION
+-> Heterogeneity of causal effect (what TYPE of politician benefits more/less from PARTY AFFILIATION)
+
+- Explore two possibilities for establishing causality
+1. Use ALLSPEECHES to control for the TYPE of politician
+ -> text may contain a signal about what kind of politician they are
+ -> may proxy for confounding variables (those that simultaneously affect PARTY AFFILITION and the Outcome)
+
+2. Use BIRTHPLACE as an IV for PARTY AFFILIATION
+ -> speeches may not perfectly measure all confounders
+ -> endogeneity even conditional on the type
 "
+
+# Strategy - To-Do
+{"
+  In General:
+  (a) corrindex ~ PARTY + (age + birthplace + married) + TYPE OF POLITCIAN 
+  (b) income ~ PARTY + (age + birthplace + married) + TYPE OF POLITCIAN
+  => as in (a) & (b) and with INTERACTION terms of PARTY with CONFOUNDERS
+  
+  Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN
+  (i) .number_speeches = How Vocal is politician
+  (ii) .speechlength = avg. length of speech
+  (iii) generality = how many basic terms per speech
+  (iv) content = TOPIC MODELLING by various indizes
+    -> may need to transform numerical corrindex and income into categorical
+"}
 
 # OLD CODE
 {
@@ -47,6 +76,8 @@ to age 50.
   #install.packages("tidyverse")
   #install.packages("tidytext")
   #install.packages("tidymodels")
+  install.packages("glmnetUtils")
+  library(glmnetUtils)
   
   library(tidyverse)
   library(tidytext)
@@ -69,10 +100,10 @@ to age 50.
   "
   
   # Plot variable by Party association
-  plot_test <- ggplot(data = (politicians %>% mutate(income = log(income))), 
+  plot_outcome <- ggplot(data = (politicians %>% mutate(income = log(income))), 
                       aes(x = income, y = corrindex, color = party, group = party)) +
     geom_point()
-  plot_test
+  print(plot_outcome)
   
   "
   Plot indicates that for both parties there is a positive correlation between
@@ -90,21 +121,24 @@ to age 50.
   data <- politicians %>% # Select Data Politicians as base
     # More or Less vocal politicians could indicate party affiliation
     mutate(.number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
+           .number_words = str_count(.allspeeches, " ")+1, # Count the total number of words in .allspeeches
+           .speechlength = .number_words/.number_speeches, # calc. average length of speech
            .birthplace = as.factor(.birthplace), # Transform birthplace to factor or categorical variable as higher or lower values have no ranking
            .party = as.factor(.party), # Transform party affiliation to factor
-           .logincome = log(.income))
+           .logincome = log(.income)) # Transform income into log
   
   # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
   data_unnested <- data %>%
     unnest_tokens(.word, .allspeeches)
   
   rm(politicians)
+  rm(new_colnames)
 }
 
 # Get overall Sentiment per speaker
 {
   "
-  when using dictionary 'bing no need to filter out the stem as it contains all
+  when using dictionary 'bing' no need to filter out the stem as it contains all
   word alterations
   "
   sentiment_dict <- get_sentiments("bing")
@@ -117,7 +151,12 @@ to age 50.
     rename(.positive = positive,
            .negative = negative)
   
+  # Join Sentiment analysis with data
   data <- data %>% left_join(sentiment, join_by(.speaker == .speaker))
+  
+  # Remove unnecessary data
+  rm(sentiment_dict)
+  rm(sentiment)
 }
 
 # Plot overall Sentiment
@@ -125,26 +164,24 @@ to age 50.
   plot_sentiment_inc <- ggplot(data = data,
                            aes(x=.sentiment, y = .logincome, color = .party, group = .party)) +
     geom_point()
-  plot_sentiment_inc
+  print(plot_sentiment_inc)
   
   plot_sentiment_corr <- ggplot(data = data,
                                aes(x=.sentiment, y = .corrindex, color = .party, group = .party)) +
     geom_point()
-  plot_sentiment_corr
+  print(plot_sentiment_corr)
 }
 
 # 'trump.R'
 {
   set.seed(12345)
+  y_var <- '.corrindex'
   # pick the words to keep as predictors
   {
     words_to_keep <- data_unnested %>%
       anti_join(get_stopwords(), join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
       count(.word) %>% # counts each individual word
-      
-      # is first filter necessary?
-      filter(str_detect(.word, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
-      filter(str_detect(.word, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
+      filter(str_detect(.word, '[0-9]', negate = TRUE)) %>% # return all entries in 'words' that contain no numbers
       
       # How do I justify the value of 2?
       filter(n > 2) |> # take only words that occur more than two times
@@ -175,6 +212,8 @@ to age 50.
       right_join(tidy_speech, by = '.speaker') %>%
       ungroup()
   }
+  rm(data_unnested)
+  rm(words_to_keep)
   
   # Create train and test sample from data merge with Term Frequency
   # NEED TO JUSTIFY 08. - 0.2 division
@@ -184,32 +223,50 @@ to age 50.
     
     train <- training(data_split)
     test <- testing(data_split)
+    rm(data_split)
   }
   
   # Create Model with corruption index as outcome variable
   {
     # (1) Simple Model
-    
+    {
+      
+    }
     
     # (2) Complex Model - Overfitting
-    # Linear Regression with all words
-    model_comp_corr <- linear_reg () %>%
-      fit(formula = .corrindex ~ .,
-          data = train %>% select(-.speaker))
-
-    # Plot in-sample Fit
-    plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, train))),
-                                 aes(x = .pred, y = .corrindex)) + geom_point()
-    plot_fit_comp_corr_in 
-    
-    # Plot out-of-sample fit
-    plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
-                                 aes(x = .pred, y = .corrindex)) +  geom_point()
-    plot_fit_comp_corr_out
-    
+    {
+      # Linear Regression with all words
+      model_comp_corr <- linear_reg () %>%
+        fit(reformulate('.', response = y_var),
+            data = train %>% select(-.speaker))
+      
+      model_comp_corr <- glmnet(reformulate('.', response = y_var),
+                                data = train[3:ncol(train)])
+      tt <- predict.glmnet(model_comp_corr, newx = train[2:ncol(train)])
+      predict
+      train %>% bind_cols(predict(model_comp_corr, newx = train))
+      
+      
+      # Plot in-sample Fit
+      plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, newx = train))),
+                                      aes(x = .pred, y = !!sym(y_var))) + geom_point()
+      print(plot_fit_comp_corr_in) 
+      
+      # Plot out-of-sample fit
+      plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
+                                       aes(x = .pred, y = !!sym(y_var))) +  geom_point()
+      print(plot_fit_comp_corr_out)
+    }
     
     # (3) Regularized Model - LASSO
-    
+    {
+      # Linear regression with LASSO penalty
+      model_regul_corr <- linear_reg(penalty = 0.01, mixture = 1) %>%
+        set_engine('glmnet') %>%
+        fit(reformulate('.', response = y_var), data = train %>% select(-.speaker))
+      
+      tidy(model_regul_corr)
+    }
   }
 }
   
