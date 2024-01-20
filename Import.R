@@ -62,25 +62,6 @@ Done  - construct var. for dominance of a party, where values all positive, no d
 Done  - construct var. for political direction of a region, e.g. 3 mostly party A, -3 mostly party B speaker
 "}
 
-# OLD CODE
-{
-  # Old speech counter
-  {
-    speech_count <- str_count(politicians$allspeeches, "\\t House of Commons Hansard Debates for ") + 1
-    data_split <- politicians %>%
-      # separate speeches of a speaker
-      separate(col = allspeeches,
-               into = paste0("speech", 1:max(speech_count)),
-               sep = "\\t House of Commons Hansard Debates for ",
-               fill = "right") %>%
-      pivot_longer(cols = starts_with("speech"),
-                   names_to = "speech_number",
-                   values_to = "speech_text",
-                   values_drop_na = TRUE) %>%
-      mutate(speech_number = parse_number(speech_number))
-  }
-}
-
 # Install & Load Packages
 {
   #install.packages("tidyverse")
@@ -290,7 +271,6 @@ rm(sentiment_dict)
   {
     # (1) Simple Model
     
-    
     # (2) Complex Model - Overfitting
     {
       # Linear Regression with all words
@@ -309,7 +289,6 @@ rm(sentiment_dict)
       print(plot_fit_comp_corr_out)
     }
     
-    
     # (3) Regularized Model - LASSO
     {
       # Linear regression with LASSO penalty
@@ -317,7 +296,17 @@ rm(sentiment_dict)
         set_engine('glmnet') %>%
         fit(reformulate('.', response = y_var), data = train %>% select(-.speaker))
       
-      tidy(model_regul_corr)
+      # Plot Fits
+      {
+        plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, train))),
+                                         aes(x = .pred, y = .corrindex)) + geom_point()
+        print(plot_fit_regul_corr_in)
+        
+        # Plot out-of-sample fit
+        plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, test))),
+                                          aes(x = .pred, y = .corrindex)) +  geom_point()
+        print(plot_fit_regul_corr_out)
+        }
     }
     
   }
