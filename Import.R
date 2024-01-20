@@ -36,7 +36,7 @@ Task:
  -> speeches may not perfectly measure all confounders
  -> endogeneity even conditional on the type
 "
-
+# data_unnested = 10,482,808 obs of 14 var
 # Strategy - To-Do
 {"
   In General:
@@ -45,8 +45,8 @@ Task:
   => as in (a) & (b) and with INTERACTION terms of PARTY with CONFOUNDERS
   
   Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN
-  DONE (i) .number_speeches = How Vocal is politician
-  DONE (ii) .speechlength = avg. length of speech
+Done  (i) .number_speeches = How Vocal is politician
+Done  (ii) .speechlength = avg. length of speech
   (iii) generality = how many basic terms per speech
   (iv) content = TOPIC MODELLING by various indizes
     -> may need to transform numerical corrindex and income into categorical
@@ -57,9 +57,9 @@ Task:
   - Categorical value, as values from 1 to 23 have no meaning, ranking etc,
     except lower values indicate rather type A and higher values rather type B
     affiliation with region, BUT only more or less
-DONE  - construct var. for dominance of a party, where values all positive, no distinguishing between A & B, 
+Done  - construct var. for dominance of a party, where values all positive, no distinguishing between A & B, 
       the higher the values the less dominated a region is by a party, thus the more intense potential campaigns
-DONE  - construct var. for political direction of a region, e.g. 3 mostly party A, -3 mostly party B speaker
+Done  - construct var. for political direction of a region, e.g. 3 mostly party A, -3 mostly party B speaker
 "}
 
 # OLD CODE
@@ -86,8 +86,6 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
   #install.packages("tidyverse")
   #install.packages("tidytext")
   #install.packages("tidymodels")
-  #install.packages("glmnetUtils")
-  library(glmnetUtils)
   
   library(tidyverse)
   library(tidytext)
@@ -99,47 +97,14 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
   load("./Data/politicians.rdata")
 }
 
-# Get quick overview of data
-{
-  summary(politicians)
-  "
-  - age between 35 and 70 with mean of 47.33
-  - 23 birthplaces
-  - corruption index between -2.633 and 3.292 with mean of 0
-  - income between 52,231 and 532,325 with mean of 112,303
-  "
-  
-  # Plot variable by Party association
-  {
-    plot_outcome <- ggplot(data = (politicians %>% mutate(income = log(income))), 
-                           aes(x = income, y = corrindex, color = party, group = party)) +
-      geom_point()
-    print(plot_outcome)
-    
-    "
-  Plot indicates that for both parties there is a positive correlation between
-  corrupt behavior and income, thus more corrupt behavior indicates higher income.
-  Slightly indicates that individuals associated to party B have less corrupt
-  behavior
-  "
-  }
-  
-  # Plot Birthplace and Party Affiliation
-  {
-    plot_birthplace <- ggplot(data = politicians, aes(x = party, fill = party)) +
-      geom_bar(position = "dodge") +
-      facet_wrap(~birthplace, scales = "free_x", ncol = 3) +
-      labs(title = "Speakers by Party and Birthplace",
-           x = "Party",
-           y = "Number of Speakers") +
-      theme_minimal()
-    
-    print(plot_birthplace)
-  }
-}
-
 # Mutate and Tidy data
 {
+  # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
+  data_unnested <- politicians %>%
+    unnest_tokens(.word, allspeeches) %>%
+    select(speaker, .word) %>%
+    rename(.speaker = speaker)
+  
   new_colnames <- paste0(".", colnames(politicians))
   colnames(politicians) <- new_colnames
   
@@ -156,19 +121,75 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
     mutate(.regionideology = sum(.party == 'A') - sum(.party == 'B'), # Identify Ideological tendence for each region
            .regionintensity = 1 - sum(.party == ifelse(sum(.party == 'A') > sum(.party == 'B'), 'A', 'B')) / n())  %>% # Identify the more prevalent party and calculate the ratio
     ungroup()
+}
+rm(politicians)
+
+# Get quick overview of data
+{
+  summary(data)
+  "
+  - age between 35 and 70 with mean of 47.33
+  - 23 birthplaces
+  - corruption index between -2.633 and 3.292 with mean of 0
+  - income between 52,231 and 532,325 with mean of 112,303
+  "
   
-  # Split column 'allspeeches' into tokens in column 'word', flattening the table into one-token-per-row
-  data_unnested <- data %>%
-    unnest_tokens(.word, .allspeeches)
+  # Plot variable by Party association
+  {
+    plot_outcome <- ggplot(data = data, 
+                           aes(x = .logincome, y = .corrindex, color = .party, group = .party)) +
+      geom_point()
+    print(plot_outcome)
+    
+    "
+  Plot indicates that for both parties there is a positive correlation between
+  corrupt behavior and income, thus more corrupt behavior indicates higher income.
+  Slightly indicates that individuals associated to party B have less corrupt
+  behavior
+  "
+  }
   
-  rm(politicians)
-  rm(new_colnames)
+  # Plot Birthplace and Party Affiliation
+  {
+    plot_birthplace <- ggplot(data = data, aes(x = .party, fill = .party)) +
+      geom_bar(position = "dodge") +
+      facet_wrap(~.birthplace, scales = "free_x", ncol = 3) +
+      labs(title = "Speakers by Party and Birthplace",
+           x = "Party",
+           y = "Number of Speakers") +
+      theme_minimal()
+    
+    print(plot_birthplace)
+  }
+  
+  # Density Plot of Income and Corruption and  by Party
+  {
+    plot_density_income <- ggplot(data = data,
+                                aes(x = .logincome, color = .party, group = .party)) +
+      geom_density(linewidth = 1) +
+      labs(x = "Income",
+           y = "Density")
+    print(plot_density_income)
+    
+    
+    plot_density_corr <- ggplot(data = data,
+                                aes(x = .corrindex, color = .party, group = .party)) +
+      geom_density(linewidth = 1) +
+      labs(x = "Corruption Index",
+           y = "Density")
+    print(plot_density_corr)
+  }
+  
+  # Linear Regression to see correlations
+  {
+    #lm()
+  }
 }
 
 # Get overall Sentiment per speaker
 {
   "
-  when using dictionary 'bing' no need to filter out the stem as it contains all
+  when using dictionary 'bing no need to filter out the stem as it contains all
   word alterations
   "
   sentiment_dict <- get_sentiments("bing")
@@ -181,43 +202,47 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
     rename(.positive = positive,
            .negative = negative)
   
-  # Join Sentiment analysis with data
   data <- data %>% left_join(sentiment, join_by(.speaker == .speaker))
-  
-  # Remove unnecessary data
-  rm(sentiment_dict)
-  rm(sentiment)
 }
 
 # Plot overall Sentiment
 {
   plot_sentiment_inc <- ggplot(data = data,
-                           aes(x=.sentiment, y = .logincome, color = .party, group = .party)) +
+                               aes(x=.sentiment, y = .logincome, color = .party, group = .party)) +
     geom_point()
-  print(plot_sentiment_inc)
+  plot_sentiment_inc
   
   plot_sentiment_corr <- ggplot(data = data,
-                               aes(x=.sentiment, y = .corrindex, color = .party, group = .party)) +
+                                aes(x=.sentiment, y = .corrindex, color = .party, group = .party)) +
     geom_point()
-  print(plot_sentiment_corr)
+  plot_sentiment_corr
 }
+
+rm(sentiment)
+rm(sentiment_dict)
 
 # 'trump.R'
 {
+  # Set a seed to reconstruct analyses
   set.seed(12345)
+  # Define outcome variable
   y_var <- '.corrindex'
+  
   # pick the words to keep as predictors
   {
     words_to_keep <- data_unnested %>%
       anti_join(get_stopwords(), join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
       count(.word) %>% # counts each individual word
-      filter(str_detect(.word, '[0-9]', negate = TRUE)) %>% # return all entries in 'words' that contain no numbers
+      
+      # is first filter necessary?
+      filter(str_detect(.word, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
+      filter(str_detect(.word, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
       
       # How do I justify the value of 2?
       filter(n > 2) |> # take only words that occur more than two times
       pull(.word) # extract the column word as vector
   }
-
+  
   # Construct Term Frequencies
   {
     tidy_speech <- data_unnested %>%
@@ -242,8 +267,6 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
       right_join(tidy_speech, by = '.speaker') %>%
       ungroup()
   }
-  rm(data_unnested)
-  rm(words_to_keep)
   
   # Create train and test sample from data merge with Term Frequency
   # NEED TO JUSTIFY 08. - 0.2 division
@@ -253,15 +276,20 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
     
     train <- training(data_split)
     test <- testing(data_split)
+  }
+  
+  # Remove dataset and clear memory for computation
+  {
     rm(data_split)
+    rm(data_unnested)
+    rm(words_to_keep)
+    gc()
   }
   
   # Create Model with corruption index as outcome variable
   {
     # (1) Simple Model
-    {
-      
-    }
+    
     
     # (2) Complex Model - Overfitting
     {
@@ -270,23 +298,17 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
         fit(reformulate('.', response = y_var),
             data = train %>% select(-.speaker))
       
-      model_comp_corr <- glmnet(reformulate('.', response = y_var),
-                                data = train[3:ncol(train)])
-      tt <- predict.glmnet(model_comp_corr, newx = train[2:ncol(train)])
-      predict
-      train %>% bind_cols(predict(model_comp_corr, newx = train))
-      
-      
       # Plot in-sample Fit
-      plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, newx = train))),
-                                      aes(x = .pred, y = !!sym(y_var))) + geom_point()
-      print(plot_fit_comp_corr_in) 
+      plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, train))),
+                                      aes(x = .pred, y = .corrindex)) + geom_point()
+      print(plot_fit_comp_corr_in)
       
       # Plot out-of-sample fit
       plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
-                                       aes(x = .pred, y = !!sym(y_var))) +  geom_point()
+                                       aes(x = .pred, y = .corrindex)) +  geom_point()
       print(plot_fit_comp_corr_out)
     }
+    
     
     # (3) Regularized Model - LASSO
     {
@@ -297,10 +319,7 @@ DONE  - construct var. for political direction of a region, e.g. 3 mostly party 
       
       tidy(model_regul_corr)
     }
+    
   }
 }
- 
-# Use Birthplace as IV
-{
-  
-}
+
