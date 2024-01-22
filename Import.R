@@ -36,7 +36,7 @@ Task:
  -> speeches may not perfectly measure all confounders
  -> endogeneity even conditional on the type
 "
-# data_unnested = 10,482,808 obs of 14 var
+
 # Strategy - To-Do
 {"
   In General:
@@ -91,7 +91,8 @@ Done  - construct var. for political direction of a region, e.g. 3 mostly party 
   
   data <- politicians %>% # Select Data Politicians as base
     # More or Less vocal politicians could indicate party affiliation
-    mutate(.number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
+    mutate(.corrupt = ifelse(.corrindex > 0, 1, 0), # categorical variable whether a politician is more or less corrupt than the average politician
+           .number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
            .number_words = str_count(.allspeeches, " ")+1, # Count the total number of words in .allspeeches
            .speechlength = .number_words/.number_speeches, # calc. average length of speech
            .birthplace = as.factor(.birthplace), # Transform birthplace to factor or categorical variable as higher or lower values have no ranking
@@ -190,12 +191,14 @@ rm(politicians)
 {
   plot_sentiment_inc <- ggplot(data = data,
                                aes(x=.sentiment, y = .logincome, color = .party, group = .party)) +
-    geom_point()
+    geom_point() +
+    geom_smooth(method='lm', formula=y~x, se=FALSE)
   plot_sentiment_inc
   
   plot_sentiment_corr <- ggplot(data = data,
                                 aes(x=.sentiment, y = .corrindex, color = .party, group = .party)) +
-    geom_point()
+    geom_point() +
+    geom_smooth(method='lm', formula=y~x, se=FALSE)
   plot_sentiment_corr
 }
 
