@@ -103,10 +103,13 @@ Done  - construct var. for political direction of a region, e.g. 3 mostly party 
     mutate(.regionideology = sum(.party == 'A') - sum(.party == 'B'), # Identify Ideological tendence for each region
            .regionintensity = 1 - sum(.party == ifelse(sum(.party == 'A') > sum(.party == 'B'), 'A', 'B')) / n())  %>% # Identify the more prevalent party and calculate the ratio
     ungroup()
+  
+  apply(is.na(data), 2, which)
 }
 rm(politicians)
 
-# Get quick overview of data
+# Get quick overview of data - Summary of Data, Plotting main variables (corrindex, income, birthplace by Party)
+# To-Do: Select output for paper and delete irrelevant memory things
 {
   summary(data)
   "
@@ -116,7 +119,7 @@ rm(politicians)
   - income between 52,231 and 532,325 with mean of 112,303
   "
   
-  # Plot variable by Party association
+  # Plot corrindex against income by Party association
   {
     plot_outcome <- ggplot(data = data, 
                            aes(x = .logincome, y = .corrindex, color = .party, group = .party)) +
@@ -162,9 +165,18 @@ rm(politicians)
     print(plot_density_corr)
   }
   
-  # Linear Regression to see correlations
+  # Linear Regression to see correlations with Corruption index and Income 
   {
-    #lm()
+    # Create string with names of independent variables
+    independent_var <- colnames(data %>% select(!c(".speaker", ".corrindex", ".birthplace", ".income", ".allspeeches", ".corrupt")))
+    
+    # Create linear regression models for corruption index and income
+    basemodel_corr <- lm((reformulate(independent_var, response =".corrindex")), data = data)
+    basemodel_income <- lm((reformulate(independent_var, response =".logincome")), data = data)
+    
+    # Pritn out results of simple regression models
+    summary(basemodel_corr)
+    summary(basemodel_income)
   }
 }
 
@@ -205,7 +217,7 @@ rm(politicians)
 rm(sentiment)
 rm(sentiment_dict)
 
-# 'trump.R'
+# Using words in speeches to predict Corruption and Income
 {
   # Set a seed to reconstruct analyses
   set.seed(12345)
@@ -231,7 +243,7 @@ rm(sentiment_dict)
   {
     tidy_speech <- data_unnested %>%
       filter(.word %in% words_to_keep) |> # Take only words that are in previous created list
-      count(.speaker, .word) |> # count per tweet, identified through '.id' the number of a word occuring
+      count(.speaker, .word) |> # count per speaker, identified through '.word' the number of a word occuring
       # Bind the term frequency and inverse document frequency of the data to the dataset
       bind_tf_idf(term = '.word', # Column containing terms as string or symbol
                   document = '.speaker', # Column containing document IDs as string or symbol
@@ -281,15 +293,25 @@ rm(sentiment_dict)
         fit(reformulate('.', response = y_var),
             data = train %>% select(-.speaker))
       
-      # Plot in-sample Fit
-      plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, train))),
-                                      aes(x = .pred, y = .corrindex)) + geom_point()
-      print(plot_fit_comp_corr_in)
+      model_comp_corr_t <- lm(reformulate('.', response = y_var), data = train %>% select(-.speaker))
       
-      # Plot out-of-sample fit
-      plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
-                                       aes(x = .pred, y = .corrindex)) +  geom_point()
-      print(plot_fit_comp_corr_out)
+      # Plot Fits
+      {
+        # Plot in-sample Fit
+        plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, train))),
+                                        aes(x = .pred, y = .corrindex)) + geom_point()
+        print(plot_fit_comp_corr_in)
+        
+        # Plot out-of-sample fit
+        plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
+                                         aes(x = .pred, y = .corrindex)) +  geom_point()
+        print(plot_fit_comp_corr_out)
+        }
+      
+      # Plot Words most strongly correlated
+      {
+        tidy(model_comp_corr)
+      }
     }
     
     # (3) Regularized Model - LASSO
@@ -310,8 +332,9 @@ rm(sentiment_dict)
                                           aes(x = .pred, y = .corrindex)) +  geom_point()
         print(plot_fit_regul_corr_out)
         }
+      
+      tidy(model_regul_corr)
     }
-    
   }
 }
 
