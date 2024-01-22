@@ -225,34 +225,39 @@ rm(sentiment_dict)
   y_var <- '.corrindex'
   
   # pick the words to keep as predictors
+  ### CHANGED WITH .wordstem
   {
-    words_to_keep <- data_unnested %>%
+    words_to_keep <- unique(data_unnested %>% # Drop double entries (drops words from 52k to 12k)
       anti_join(get_stopwords(), join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
-      count(.word) %>% # counts each individual word
+      mutate(.stem = wordStem(.word)) %>%
+      count(.stem) %>% # counts each individual word
       
       # is first filter necessary?
-      filter(str_detect(.word, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
-      filter(str_detect(.word, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
+      filter(str_detect(.stem, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
+      filter(str_detect(.stem, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
       
       # How do I justify the value of 2?
       filter(n > 2) |> # take only words that occur more than two times
-      pull(.word) # extract the column word as vector
+      pull(.stem)) # extract the column word as vector
   }
   
   # Construct Term Frequencies
   {
     tidy_speech <- data_unnested %>%
-      filter(.word %in% words_to_keep) |> # Take only words that are in previous created list
-      count(.speaker, .word) |> # count per speaker, identified through '.word' the number of a word occuring
+      mutate(.stem = wordStem(.word)) %>%
+      filter(.stem %in% words_to_keep) %>% # Take only words that are in previous created list
+      count(.speaker, .stem) %>% # count per speaker, identified through '.stem' the number of a word occuring
       # Bind the term frequency and inverse document frequency of the data to the dataset
-      bind_tf_idf(term = '.word', # Column containing terms as string or symbol
+      bind_tf_idf(term = '.stem', # Column containing terms as string or symbol
                   document = '.speaker', # Column containing document IDs as string or symbol
-                  n = 'n') |> # Column containing document-term counts as string or symbol
-      select(.speaker, .word, tf) |> # select ID, word and term-frequency column
+                  n = 'n') %>% # Column containing document-term counts as string or symbol
+      select(.speaker, .stem, tf) %>% # select ID, word and term-frequency column
+      
+      filter(.stem != "") %>% # Filter out EMPTY strings
       # pivot wider into a document-term matrix
-      pivot_wider(id_cols = .speaker,
-                  names_from = .word,
-                  values_from = tf,
+      pivot_wider(id_cols = '.speaker',
+                  names_from = '.stem',
+                  values_from = 'tf',
                   values_fill = 0)
   }
   
@@ -292,8 +297,6 @@ rm(sentiment_dict)
       model_comp_corr <- linear_reg () %>%
         fit(reformulate('.', response = y_var),
             data = train %>% select(-.speaker))
-      
-      model_comp_corr_t <- lm(reformulate('.', response = y_var), data = train %>% select(-.speaker))
       
       # Plot Fits
       {
