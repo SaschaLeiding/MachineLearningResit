@@ -69,10 +69,12 @@ Done  - construct var. for political direction of a region, e.g. 3 mostly party 
   #install.packages("tidyverse")
   #install.packages("tidytext")
   #install.packages("tidymodels")
+  #install.packages("glmnet")
   
   library(tidyverse)
   library(tidytext)
   library(tidymodels)
+  library(glmnet)
 }
 
 # Load Data
@@ -98,7 +100,8 @@ Done  - construct var. for political direction of a region, e.g. 3 mostly party 
            .number_words = str_count(.allspeeches, " ")+1, # Count the total number of words in .allspeeches
            .speechlength = .number_words/.number_speeches, # calc. average length of speech
            .birthplace = as.factor(.birthplace), # Transform birthplace to factor or categorical variable as higher or lower values have no ranking
-           .party = as.factor(.party), # Transform party affiliation to factor
+           #.party = as.factor(.party), # Transform party affiliation to factor
+           .partydummy = ifelse(.party == "B", 1, 0),
            .logincome = log(.income)) %>% # Transform income into log
     group_by(.birthplace) %>%
     # ASSUMPTION: all politicians within a birthplace are included in the data, or distribution and choice of entries are representative for a region
@@ -278,6 +281,7 @@ rm(sentiment_dict)
   
   # Create train and test sample from data merge with Term Frequency
   # NEED TO JUSTIFY 08. - 0.2 division
+  # Too little data for stratification by BIRTHPLACE
   {
     # split sample into training and test sample
     data_split <- initial_split(tidy_speech, prop = 0.8) # split into 80% training and 20% test
@@ -351,11 +355,26 @@ rm(sentiment_dict)
         print(plot_fit_regul_corr_out)
         }
       
-      tidy(model_regul_corr) %>%
-        filter(estimate >= 1000) %>%
-        ggplot(aes(x = estimate,
-                   y = fct_reorder(term, estimate, .desc = TRUE))) +
-        geom_col()
+      # Plot most important words
+      {
+        tidy(model_regul_corr) %>%
+          filter(estimate >= 1000) %>%
+          ggplot(aes(x = estimate,
+                     y = fct_reorder(term, estimate, .desc = TRUE))) +
+          geom_col()
+      }
+      
+      # Create outcome variable
+      Y <- as.matrix(train[y_var])
+      W <- train[, !(colnames(train) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace"))] # Covariates
+      D <- train$.partydummy # Variable of Interest
+      X <- as.matrix(cbind(D, W))
+      
+      test_l <- cv.glmnet(x=X, y=Y, nfolds=10)
+      plot(test_l) # first dotted line gives the minimum MSE from CV while second gives most regularized model
+      log(test_l$lambda.min) # lambda with minimum MSE
+      log(test_l$lambda.1se) # lambda of most regul. model such CV error is within 1 SE of the min.
+      
     }
   }
 }
