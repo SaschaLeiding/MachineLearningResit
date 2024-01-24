@@ -50,6 +50,8 @@ Done  (ii) .speechlength = avg. length of speech
   (iii) generality = how many basic terms per speech
   (iv) content = TOPIC MODELLING by various indizes
     -> may need to transform numerical corrindex and income into categorical
+
+  Should numbers be dropped?
     
   Birthplace:
   - number indicating the region a speaker was born in
@@ -150,7 +152,7 @@ rm(politicians)
   # Density Plot of Income and Corruption and  by Party
   {
     plot_density_income <- ggplot(data = data,
-                                aes(x = .logincome, color = .party, group = .party)) +
+                                  aes(x = .logincome, color = .party, group = .party)) +
       geom_density(linewidth = 1) +
       labs(x = "Income",
            y = "Density")
@@ -221,42 +223,47 @@ rm(sentiment_dict)
 {
   # Set a seed to reconstruct analyses
   set.seed(12345)
-  # Define outcome variable
-  y_var <- '.corrindex'
+  # Define variables
+  y_var <- '.corrindex' # Choose between '.corrindex' or '.logincome'
+  word_type <- '.word' # Choose between '.word' or '.stem'
+  
   
   # pick the words to keep as predictors
-  ### CHANGED WITH .wordstem
+  # Need to choose between taking full words or word stems only (words = 16.6k vs. stem = 12k entries)
   {
-    words_to_keep <- unique(data_unnested %>% # Drop double entries (drops words from 52k to 12k)
-      anti_join(get_stopwords(), join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself... 
-      mutate(.stem = wordStem(.word)) %>%
-      count(.stem) %>% # counts each individual word
-      
-      # is first filter necessary?
-      filter(str_detect(.stem, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
-      filter(str_detect(.stem, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
-      
-      # How do I justify the value of 2?
-      filter(n > 2) |> # take only words that occur more than two times
-      pull(.stem)) # extract the column word as vector
+    words_to_keep <- unique(data_unnested %>% # Drop double entries (drops words from 484k to 17k)
+                              anti_join(get_stopwords(), join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself...
+                              mutate(.wordtype = if(word_type == '.word'){.word}
+                                     else{wordStem(.word)}) %>%
+                              count(.wordtype) %>%
+                              
+                              # is first filter necessary?
+                              filter(str_detect(.wordtype, '.co|.com|.net|.edu|.gov|http', negate = TRUE)) |> # return all entries in 'word' that do NOT contain the listed words of URLs
+                              filter(str_detect(.wordtype, '[0-9]', negate = TRUE)) |> # return all entries in 'words' that contain no numbers
+                              
+                              # How do I justify the value of 2?
+                              filter(n > 2) |> # take only words that occur more than two times
+                              pull(.wordtype)) # extract the column word as vector
   }
   
   # Construct Term Frequencies
   {
     tidy_speech <- data_unnested %>%
-      mutate(.stem = wordStem(.word)) %>%
-      filter(.stem %in% words_to_keep) %>% # Take only words that are in previous created list
-      count(.speaker, .stem) %>% # count per speaker, identified through '.stem' the number of a word occuring
+      transmute(.wordtype = if(word_type == '.word'){.word}
+                else{wordStem(.word)}) %>%
+      rename(.word = .wordtype) %>%
+      filter(.word %in% words_to_keep) %>% # Take only words that are in previous created list
+      count(.speaker, .word) %>% # count per speaker, identified through '.word' the number of a word occuring
       # Bind the term frequency and inverse document frequency of the data to the dataset
-      bind_tf_idf(term = '.stem', # Column containing terms as string or symbol
+      bind_tf_idf(term = '.word', # Column containing terms as string or symbol
                   document = '.speaker', # Column containing document IDs as string or symbol
                   n = 'n') %>% # Column containing document-term counts as string or symbol
-      select(.speaker, .stem, tf) %>% # select ID, word and term-frequency column
+      select(.speaker, .word, tf) %>% # select ID, word and term-frequency column
       
-      filter(.stem != "") %>% # Filter out EMPTY strings
+      filter(.word != "") %>% # Filter out EMPTY strings
       # pivot wider into a document-term matrix
       pivot_wider(id_cols = '.speaker',
-                  names_from = '.stem',
+                  names_from = '.word',
                   values_from = 'tf',
                   values_fill = 0)
   }
@@ -302,12 +309,16 @@ rm(sentiment_dict)
       {
         # Plot in-sample Fit
         plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, train))),
-                                        aes(x = .pred, y = .corrindex)) + geom_point()
+                                        aes(x = .pred, y = .corrindex)) + 
+          geom_point() +
+          geom_abline(intercept = 0, slope = 1, size = 0.5)
         print(plot_fit_comp_corr_in)
         
         # Plot out-of-sample fit
         plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
-                                         aes(x = .pred, y = .corrindex)) +  geom_point()
+                                         aes(x = .pred, y = .corrindex)) +  
+          geom_point() +
+          geom_abline(intercept = 0, slope = 1, size = 0.5)
         print(plot_fit_comp_corr_out)
         }
       
@@ -327,16 +338,24 @@ rm(sentiment_dict)
       # Plot Fits
       {
         plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, train))),
-                                         aes(x = .pred, y = .corrindex)) + geom_point()
+                                         aes(x = .pred, y = .corrindex)) + 
+          geom_point() +
+          geom_abline(intercept = 0, slope = 1, size = 0.5)
         print(plot_fit_regul_corr_in)
         
         # Plot out-of-sample fit
         plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, test))),
-                                          aes(x = .pred, y = .corrindex)) +  geom_point()
+                                          aes(x = .pred, y = .corrindex)) + 
+          geom_point() +
+          geom_abline(intercept = 0, slope = 1, size = 0.5)
         print(plot_fit_regul_corr_out)
         }
       
-      tidy(model_regul_corr)
+      tidy(model_regul_corr) %>%
+        filter(estimate >= 1000) %>%
+        ggplot(aes(x = estimate,
+                   y = fct_reorder(term, estimate, .desc = TRUE))) +
+        geom_col()
     }
   }
 }
