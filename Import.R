@@ -172,8 +172,11 @@ rm(politicians)
   
   # Linear Regression to see correlations with Corruption index and Income 
   {
-    # Create string with names of independent variables
-    independent_var <- colnames(data %>% select(!c(".speaker", ".corrindex", ".birthplace", ".income", ".allspeeches", ".corrupt")))
+    # Create string with names of independent variables, drop ID, dependent or double variables/derived variables
+    independent_var <- colnames(data %>% 
+                                  select(!c(".speaker", # ID variables
+                                            ".corrindex", ".birthplace", ".income",".logincome", # Dependent
+                                            ".partydummy", ".allspeeches", ".corrupt", ".sentiment"))) # Derived variables
     
     # Create linear regression models for corruption index and income
     basemodel_corr <- lm((reformulate(independent_var, response =".corrindex")), data = data)
@@ -364,17 +367,27 @@ rm(sentiment_dict)
           geom_col()
       }
       
-      # Create outcome variable
-      Y <- as.matrix(train[y_var])
-      W <- train[, !(colnames(train) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace"))] # Covariates
-      D <- train$.partydummy # Variable of Interest
-      X <- as.matrix(cbind(D, W))
-      
-      test_l <- cv.glmnet(x=X, y=Y, nfolds=10)
-      plot(test_l) # first dotted line gives the minimum MSE from CV while second gives most regularized model
-      log(test_l$lambda.min) # lambda with minimum MSE
-      log(test_l$lambda.1se) # lambda of most regul. model such CV error is within 1 SE of the min.
-      
+      # TEST LASSO
+      {
+        # Create outcome variable
+        Y <- as.matrix(train[y_var])
+        W <- train[, !(colnames(train) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace"))] # Covariates
+        D <- train$.partydummy # Variable of Interest
+        X <- as.matrix(cbind(D, W))
+        
+        test_l <- cv.glmnet(x=X, y=Y, # Input
+                            nfolds=10, # Number of folds to CV
+                            type.measure = "mse") # the measure used to optimize CV
+        plot(test_l) # first dotted line gives the minimum MSE from CV while second gives most regularized model
+        log(test_l$lambda.min) # lambda with minimum MSE
+        log(test_l$lambda.1se) # lambda of most regul. model such CV error is within 1 SE of the min.
+        print(test_l) #Prints: Lambda, the index of which lambdas (position), the measure value to optimize CV, SE, number of nonzero coefficients
+        
+        # Extract non-zero coefficients at lambda.min
+        non_zero_coefficients <- as.data.frame(as.matrix(coef(test_l, s = "lambda.min"))) %>%
+          filter(.[[1]] != 0)
+      }
+
     }
   }
 }
