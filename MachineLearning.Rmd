@@ -201,8 +201,8 @@ rm(sentiment_dict)
     summary(basemodel_income)
 ```
 
-# Speech Analysis
-```{r speechanalysis}
+# Prepare Speech Analysis
+```{r prepspeechanalysis}
   # Set a seed to reconstruct analyses
   set.seed(12345)
   # Define variables
@@ -271,13 +271,19 @@ rm(sentiment_dict)
   
   # Remove dataset and clear memory for computation
   {
-    rm(data_split)
-    rm(data_unnested)
-    rm(words_to_keep)
-    gc()
+    #rm(data_split)
+    #rm(data_unnested)
+    #rm(words_to_keep)
+    #gc()
   }
-  
-  # Analysis of Terms with various Models
+```
+
+# Conduct Speech Analysis
+```{r speechanalysis}
+# Set a seed to reconstruct analyses
+  set.seed(12345)
+
+# Analysis of Terms with various Models
   {
     # Define Variables
     Y_train <- train[y_var] # Dependent Variable
@@ -380,3 +386,4 @@ rm(sentiment_dict)
     }
   }
 ```
+
