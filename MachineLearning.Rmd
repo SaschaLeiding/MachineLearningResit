@@ -37,11 +37,15 @@ Birthplace: - number indicating the region a speaker was born in =\> How to deal
   #install.packages("tidytext")
   #install.packages("tidymodels")
   #install.packages("glmnet")
-  
+  #install.packages("glmnetUtils")
+  #install.packages("wordcloud")
+
   library(tidyverse)
   library(tidytext)
   library(tidymodels)
   library(glmnet)
+  library(glmnetUtils)
+  library(wordcloud)
 ```
 
 # Load Data
@@ -74,7 +78,7 @@ Birthplace: - number indicating the region a speaker was born in =\> How to deal
     ungroup()
   
   # Transform Categorical variables to dummies, as transformation to as.factor() needs to much processing
-  for (i in 1:22) {
+  for (i in 1:21) {
       new_col <- paste0(".birthplace", i)
       data[new_col] <- ifelse(data$.birthplace==i, 1, 0)
     }
@@ -185,8 +189,8 @@ rm(sentiment_dict)
 # Create string with names of independent variables, drop ID, dependent or double variables/derived variables
     independent_var <- colnames(data %>% 
                                   select(!c(".speaker", # ID variables
-                                            ".corrindex", ".birthplace", ".income",".logincome", # Dependent
-                                            ".partydummy", ".allspeeches", ".corrupt", ".sentiment"))) # Derived variables
+                                            ".corrindex", ".corrupt", ".income",".logincome", # Dependent
+                                            ".party", ".allspeeches", ".birthplace", ".sentiment"))) # Derived variables
     
     # Create linear regression models for corruption index and income
     basemodel_corr <- lm((reformulate(independent_var, response =".corrindex")), data = data)
@@ -199,7 +203,7 @@ rm(sentiment_dict)
 
 # Speech Analysis
 ```{r speechanalysis}
-# Set a seed to reconstruct analyses
+  # Set a seed to reconstruct analyses
   set.seed(12345)
   # Define variables
   y_var <- '.corrindex' # Choose between '.corrindex' or '.logincome'
@@ -273,28 +277,39 @@ rm(sentiment_dict)
     gc()
   }
   
-  # Create Model with corruption index as outcome variable
+  # Analysis of Terms with various Models
   {
+    # Define Variables
+    Y_train <- train[y_var] # Dependent Variable
+    W_train <- train[, !(colnames(train) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace", ".partydummy", ".corrupt"))] # Covariates - Nuisance Parameters
+    D_train <- train['.partydummy'] # Target Parameter
+    X_train <- cbind(D_train, W_train) # Observed Regressors - 16,637 variables
+
+    # Disselect variable for test
+    Y_test <- test[y_var] # Dependent Variable
+    W_test <- test[, !(colnames(test) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace", ".partydummy", ".corrupt"))] # Covariates - Nuisance Parameters
+    D_test <- test['.partydummy'] # Target Parameter
+    X_test <- cbind(D_test, W_test) # Observed Regressors - 16,637 variables
+
     # (1) Simple Model
     
     # (2) Complex Model - Overfitting
     {
       # Linear Regression with all words
-      model_comp_corr <- linear_reg () %>%
-        fit(reformulate('.', response = y_var),
-            data = train %>% select(-.speaker))
+      model_comp_corr <- linear_reg () %>%  
+        fit_xy(y=Y_train, x=X_train) # 75sec
       
       # Plot Fits
       {
         # Plot in-sample Fit
-        plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, train))),
+        plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, X_train))),
                                         aes(x = .pred, y = .corrindex)) + 
           geom_point() +
           geom_abline(intercept = 0, slope = 1, size = 0.5)
         print(plot_fit_comp_corr_in)
         
         # Plot out-of-sample fit
-        plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, test))),
+        plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, new_data=X_test))),
                                          aes(x = .pred, y = .corrindex)) +  
           geom_point() +
           geom_abline(intercept = 0, slope = 1, size = 0.5)
@@ -307,23 +322,23 @@ rm(sentiment_dict)
       }
     }
     
-    # (3) Regularized Model - LASSO
+    # (3) Regularized Model - LASSO - lambda 0.1
     {
       # Linear regression with LASSO penalty
       model_regul_corr <- linear_reg(penalty = 0.01, mixture = 1) %>%
         set_engine('glmnet') %>%
-        fit(reformulate('.', response = y_var), data = train %>% select(-.speaker))
-      
+        fit_xy(y=Y_train, x=X_train)
+
       # Plot Fits
       {
-        plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, train))),
+        plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, X_train))),
                                          aes(x = .pred, y = .corrindex)) + 
           geom_point() +
           geom_abline(intercept = 0, slope = 1, size = 0.5)
         print(plot_fit_regul_corr_in)
         
         # Plot out-of-sample fit
-        plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, test))),
+        plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, X_test))),
                                           aes(x = .pred, y = .corrindex)) + 
           geom_point() +
           geom_abline(intercept = 0, slope = 1, size = 0.5)
@@ -339,15 +354,9 @@ rm(sentiment_dict)
           geom_col()
       }
       
-      # TEST LASSO
+    # (4) Regularized Model - LASSO - lambda Cross-validated(CV)
       {
-        # Create outcome variable
-        Y <- as.matrix(train[y_var])
-        W <- train[, !(colnames(train) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace"))] # Covariates
-        D <- train$.partydummy # Variable of Interest
-        X <- as.matrix(cbind(D, W))
-        
-        test_l <- cv.glmnet(x=X, y=Y, # Input
+        test_l <- cv.glmnet(x=as.matrix(X_train), y=as.matrix(Y_train), # Input
                             nfolds=10, # Number of folds to CV
                             type.measure = "mse") # the measure used to optimize CV
         plot(test_l) # first dotted line gives the minimum MSE from CV while second gives most regularized model
@@ -358,6 +367,14 @@ rm(sentiment_dict)
         # Extract non-zero coefficients at lambda.min
         non_zero_coefficients <- as.data.frame(as.matrix(coef(test_l, s = "lambda.min"))) %>%
           filter(.[[1]] != 0)
+        print(non_zero_coefficients)
+        
+        test_first <- non_zero_coefficients[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
+                                       !grepl("^\\.", rownames(non_zero_coefficients)), ]
+        names <- rownames(non_zero_coefficients)[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
+                                                      !grepl("^\\.", rownames(non_zero_coefficients))]
+        
+        test_wc <- wordcloud(words = names, freq=test_first)
       }
 
     }
