@@ -271,119 +271,139 @@ rm(sentiment_dict)
   
   # Remove dataset and clear memory for computation
   {
-    #rm(data_split)
-    #rm(data_unnested)
-    #rm(words_to_keep)
-    #gc()
+    rm(data_split)
+    rm(data_unnested)
+    rm(words_to_keep)
+    gc()
   }
 ```
 
 # Conduct Speech Analysis
 ```{r speechanalysis}
 # Set a seed to reconstruct analyses
-  set.seed(12345)
+set.seed(12345)
 
-# Analysis of Terms with various Models
+# Define Variables
+{
+  Y_train <- train[y_var] # Dependent Variable
+  W_train <- train[, !(colnames(train) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace", ".partydummy", ".corrupt"))] # Covariates - Nuisance Parameters
+  D_train <- train['.partydummy'] # Target Parameter
+  X_train <- cbind(D_train, W_train) # Observed Regressors - 16,637 variables
+
+  # Disselect variable for test
+  Y_test <- test[y_var] # Dependent Variable
+  W_test <- test[, !(colnames(test) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace", ".partydummy", ".corrupt"))] # Covariates - Nuisance Parameters
+  D_test <- test['.partydummy'] # Target Parameter
+  X_test <- cbind(D_test, W_test) # Observed Regressors - 16,637 variables
+}
+# (1) Simple Model
+    
+# (2) Complex Model - Overfitting
+{
+  # Linear Regression with all words
+  model_comp_corr <- linear_reg () %>%
+    fit_xy(y=Y_train, x=X_train)
+      
+  # Plot Fits
   {
-    # Define Variables
-    Y_train <- train[y_var] # Dependent Variable
-    W_train <- train[, !(colnames(train) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace", ".partydummy", ".corrupt"))] # Covariates - Nuisance Parameters
-    D_train <- train['.partydummy'] # Target Parameter
-    X_train <- cbind(D_train, W_train) # Observed Regressors - 16,637 variables
-
-    # Disselect variable for test
-    Y_test <- test[y_var] # Dependent Variable
-    W_test <- test[, !(colnames(test) %in% c(".speaker", ".corrindex", ".income", ".logincome", ".party", ".birthplace", ".partydummy", ".corrupt"))] # Covariates - Nuisance Parameters
-    D_test <- test['.partydummy'] # Target Parameter
-    X_test <- cbind(D_test, W_test) # Observed Regressors - 16,637 variables
-
-    # (1) Simple Model
+    # Plot in-sample Fit
+    plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, X_train))),
+                                    aes(x = .pred, y = .corrindex)) +
+      geom_point() +
+      geom_abline(intercept = 0, slope = 1, size = 0.5)
+    print(plot_fit_comp_corr_in)
+        
+    # Plot out-of-sample fit
+    plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, new_data=X_test))),
+                                     aes(x = .pred, y = .corrindex)) +  
+        geom_point() +
+        geom_abline(intercept = 0, slope = 1, size = 0.5)
+    print(plot_fit_comp_corr_out)
+  }
+      
+  # Plot Words most strongly correlated
+  tidy(model_comp_corr)
+}
     
-    # (2) Complex Model - Overfitting
-    {
-      # Linear Regression with all words
-      model_comp_corr <- linear_reg () %>%  
-        fit_xy(y=Y_train, x=X_train) # 75sec
-      
-      # Plot Fits
-      {
-        # Plot in-sample Fit
-        plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, X_train))),
-                                        aes(x = .pred, y = .corrindex)) + 
-          geom_point() +
-          geom_abline(intercept = 0, slope = 1, size = 0.5)
-        print(plot_fit_comp_corr_in)
+# (3) Regularized Model - LASSO - lambda 0.1
+{
+  # Linear regression with LASSO penalty
+  model_regul_corr <- linear_reg(penalty = 0.01, mixture = 1) %>%
+    set_engine('glmnet') %>%
+    fit_xy(y=Y_train, x=X_train)
+
+  # Plot Fits
+  {
+    #Plot in-sample fit
+    plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, X_train))),
+                                     aes(x = .pred, y = .corrindex)) + 
+      geom_point() +
+      geom_abline(intercept = 0, slope = 1, size = 0.5)
+    print(plot_fit_regul_corr_in)
         
-        # Plot out-of-sample fit
-        plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, new_data=X_test))),
-                                         aes(x = .pred, y = .corrindex)) +  
-          geom_point() +
-          geom_abline(intercept = 0, slope = 1, size = 0.5)
-        print(plot_fit_comp_corr_out)
-        }
+    # Plot out-of-sample fit
+    plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, X_test))),
+                                      aes(x = .pred, y = .corrindex)) + 
+      geom_point() +
+      geom_abline(intercept = 0, slope = 1, size = 0.5)
+    print(plot_fit_regul_corr_out)
+  }
       
-      # Plot Words most strongly correlated
-      {
-        tidy(model_comp_corr)
-      }
-    }
+  # Plot most important words
+  {
+    tidy(model_regul_corr) %>%
+      filter(estimate >= 1000) %>%
+      ggplot(aes(x = estimate,
+                 y = fct_reorder(term, estimate, .desc = TRUE))) +
+      geom_col()
     
-    # (3) Regularized Model - LASSO - lambda 0.1
+    wordcloud(words = tidy(model_regul_corr)$term,
+              freq = tidy(model_regul_corr)$estimate,
+              max.words = 100)
+  }
+}
+      
+# (4) Regularized Model - LASSO - lambda Cross-validated(CV)
+{
+    model_cvregul_corr <- cv.glmnet(x=as.matrix(X_train), y=as.matrix(Y_train), # Input
+                                    nfolds=10, # Number of folds to CV
+                                    type.measure = "mse") # the measure used to optimize CV
+    plot(model_cvregul_corr) # 1st dot-line gives the min MSE from CV while 2nd gives most regularized model
+    print(model_cvregul_corr) #Prints: Lambda, the index of which lambdas (position), the measure value to optimize CV, SE, number of nonzero coefficients
+    model_cvregul_corr$lambda.min
+        
+    # Extract non-zero coefficients at lambda.min
+    non_zero_coefficients <- as.data.frame(as.matrix(coef(model_cvregul_corr, s = "lambda.min"))) %>%
+      filter(.[[1]] != 0)
+    print(non_zero_coefficients)
+    
+    # Create Wordcloud with non-zero regularized words
+    wordcloud(words = rownames(non_zero_coefficients)[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
+                                                  !grepl("^\\.", rownames(non_zero_coefficients))],
+              freq=non_zero_coefficients[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
+                                   !grepl("^\\.", rownames(non_zero_coefficients)), ])
+    
+    # Plot Fit
     {
-      # Linear regression with LASSO penalty
-      model_regul_corr <- linear_reg(penalty = 0.01, mixture = 1) %>%
-        set_engine('glmnet') %>%
-        fit_xy(y=Y_train, x=X_train)
-
-      # Plot Fits
-      {
-        plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, X_train))),
-                                         aes(x = .pred, y = .corrindex)) + 
-          geom_point() +
-          geom_abline(intercept = 0, slope = 1, size = 0.5)
-        print(plot_fit_regul_corr_in)
-        
-        # Plot out-of-sample fit
-        plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, X_test))),
-                                          aes(x = .pred, y = .corrindex)) + 
-          geom_point() +
-          geom_abline(intercept = 0, slope = 1, size = 0.5)
-        print(plot_fit_regul_corr_out)
-        }
-      
-      # Plot most important words
-      {
-        tidy(model_regul_corr) %>%
-          filter(estimate >= 1000) %>%
-          ggplot(aes(x = estimate,
-                     y = fct_reorder(term, estimate, .desc = TRUE))) +
-          geom_col()
-      }
-      
-    # (4) Regularized Model - LASSO - lambda Cross-validated(CV)
-      {
-        test_l <- cv.glmnet(x=as.matrix(X_train), y=as.matrix(Y_train), # Input
-                            nfolds=10, # Number of folds to CV
-                            type.measure = "mse") # the measure used to optimize CV
-        plot(test_l) # first dotted line gives the minimum MSE from CV while second gives most regularized model
-        log(test_l$lambda.min) # lambda with minimum MSE
-        log(test_l$lambda.1se) # lambda of most regul. model such CV error is within 1 SE of the min.
-        print(test_l) #Prints: Lambda, the index of which lambdas (position), the measure value to optimize CV, SE, number of nonzero coefficients
-        
-        # Extract non-zero coefficients at lambda.min
-        non_zero_coefficients <- as.data.frame(as.matrix(coef(test_l, s = "lambda.min"))) %>%
-          filter(.[[1]] != 0)
-        print(non_zero_coefficients)
-        
-        test_first <- non_zero_coefficients[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
-                                       !grepl("^\\.", rownames(non_zero_coefficients)), ]
-        names <- rownames(non_zero_coefficients)[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
-                                                      !grepl("^\\.", rownames(non_zero_coefficients))]
-        
-        test_wc <- wordcloud(words = names, freq=test_first)
-      }
-
+      # Plot in-sample fit
+      plot_fit_cvregul_corr_in <- ggplot(data = (train %>% 
+                                                   bind_cols(predict(model_cvregul_corr, newx=as.matrix(X_train),
+                                                                     s="lambda.min", type="link"))),
+                                     aes(x = lambda.min, y = .corrindex)) + 
+      geom_point() +
+      geom_abline(intercept = 0, slope = 1, size = 0.5)
+    print(plot_fit_cvregul_corr_in)
+    
+    # Plot out_of-sample fit
+      plot_fit_cvregul_corr_out <- ggplot(data = (test %>% 
+                                                   bind_cols(predict(model_cvregul_corr, newx=as.matrix(X_test),
+                                                                     s="lambda.min", type="link"))),
+                                     aes(x = lambda.min, y = .corrindex)) + 
+      geom_point() +
+      geom_abline(intercept = 0, slope = 1, size = 0.5)
+    print(plot_fit_cvregul_corr_out)
     }
   }
+
 ```
 
