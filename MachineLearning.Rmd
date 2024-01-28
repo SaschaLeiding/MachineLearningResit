@@ -39,8 +39,7 @@ Birthplace: - number indicating the region a speaker was born in =\> How to deal
   #install.packages("glmnet")
   #install.packages("glmnetUtils")
   #install.packages("wordcloud")
-  #install.packages("gridExtra")
-
+  #install.packages("patchwork")
 
   library(tidyverse)
   library(tidytext)
@@ -48,7 +47,7 @@ Birthplace: - number indicating the region a speaker was born in =\> How to deal
   library(glmnet)
   library(glmnetUtils)
   library(wordcloud)
-  library(gridExtra)
+  library(patchwork)
 ```
 
 # Load Data
@@ -200,7 +199,7 @@ rm(sentiment_dict)
     basemodel_income <- lm((reformulate(independent_var, response =".logincome")), data = data)
     
     # Pritn out results of simple regression models
-    summary(basemodel_corr)
+    summary(basemodel_corr) # If party=1, thus B, .corrindex drops by 0.1989 at 0.001% significance level
     summary(basemodel_income)
 ```
 
@@ -286,6 +285,9 @@ rm(sentiment_dict)
 # Set a seed to reconstruct analyses
 set.seed(12345)
 
+# Change GGplot setting
+theme_update(plot.subtitle = element_text(hjust = 0.5))
+
 # Define Variables
 {
   Y_train <- train[y_var] # Dependent Variable
@@ -313,13 +315,15 @@ set.seed(12345)
     plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, X_train))),
                                     aes(x = .pred, y = .corrindex)) +
       geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5)
+      geom_abline(intercept = 0, slope = 1, size = 0.5) +
+      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
 
     # Plot out-of-sample fit
     plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, new_data=X_test))),
                                      aes(x = .pred, y = .corrindex)) +  
         geom_point() +
-        geom_abline(intercept = 0, slope = 1, size = 0.5)
+        geom_abline(intercept = 0, slope = 1, size = 0.5) +
+      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
   }
       
   # Plot Words most strongly correlated
@@ -339,13 +343,15 @@ set.seed(12345)
     plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, X_train))),
                                      aes(x = .pred, y = .corrindex)) + 
       geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5)
+      geom_abline(intercept = 0, slope = 1, size = 0.5) +
+      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
 
     # Plot out-of-sample fit
     plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, X_test))),
                                       aes(x = .pred, y = .corrindex)) + 
       geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5)
+      geom_abline(intercept = 0, slope = 1, size = 0.5) +
+      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
   }
       
   # Plot most important words
@@ -390,7 +396,8 @@ set.seed(12345)
                                                                      s="lambda.min", type="link"))),
                                      aes(x = lambda.min, y = .corrindex)) + 
       geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5)
+      geom_abline(intercept = 0, slope = 1, size = 0.5) +
+      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
       
     # Plot out_of-sample fit
       plot_fit_cvregul_corr_out <- ggplot(data = (test %>% 
@@ -398,11 +405,46 @@ set.seed(12345)
                                                                      s="lambda.min", type="link"))),
                                      aes(x = lambda.min, y = .corrindex)) + 
       geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5)
+      geom_abline(intercept = 0, slope = 1, size = 0.5) +
+      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
     }
 }
-grid.arrange(plot_fit_comp_corr_in, plot_fit_regul_corr_in, plot_fit_cvregul_corr_in,
-             plot_fit_comp_corr_out, plot_fit_regul_corr_out, plot_fit_cvregul_corr_out,
-             ncol=3, nrow=2)
+
+# Merge in-/ and out-of-sample fit Plots
+{
+ combined_plots <- ((plot_fit_comp_corr_in + plot_fit_regul_corr_in + plot_fit_cvregul_corr_in)/
+                     (plot_fit_comp_corr_out + plot_fit_regul_corr_out + plot_fit_cvregul_corr_out)) + 
+                  plot_layout(guides = 'collect')
+
+label_plots <- map((c("OLS", "LASSO", "LASSO CV")), ~ ggplot() + 
+                    theme_void() + 
+                    theme(plot.margin = margin(0, 0, 0, 0)) + 
+                    annotate("text", x = 0.5, y = 0.5, label = .x, fontface = "bold", hjust = 0.5))
+
+final_plot <- ((label_plots[[1]] | label_plots[[2]] | label_plots[[3]]) / combined_plots) +
+  plot_layout(heights = c(1, 10))
+
+print(final_plot) 
+}
+
+# (5) Regularized Model - Double LASSO
+# To-do: DISTINGUISH BETWEEN TRAIN and TEST?
+{
+  # Partial out confounders from outcome
+  model_dlcvregul_corrY <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Y_train))
+  fitted.lasso.Y <- predict(model_dlcvregul_corrY, newx=as.matrix(W_train), s="lambda.min")
+  Ytilde_corr <- as.matrix(Y_train) - fitted.lasso.Y
+  
+  # Partial out confounders from Party Affiliation
+  model_dlcvregul_corrD <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(D_train))
+  fitted.lasso.D <- predict(model_dlcvregul_corrD, newx=as.matrix(W_train), s="lambda.min")
+  Dtilde_corr <- as.matrix(D_train) - fitted.lasso.D
+  
+  # Run OLS of Ytilde on Dtilde
+  fit.doubleLASSO <- lm(Ytilde_corr ~ Dtilde_corr)
+	beta1hat <- coef(fit.doubleLASSO)[2]
+	print(beta1hat)
+}
+
 ```
 
