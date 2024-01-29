@@ -5,31 +5,10 @@ date: "`r Sys.Date()`"
 output: word_document
 ---
 
-# Task and Variable Description
-
-Variables: speaker = identifying number of the politician party = party affiliation of the politician; there are only two parties ("A" and "B") age0 = age of the politician when giving the first speech in parliament birthplace = identifying number of the region in which the politician was born married = indicator for marriage (1=married, 0=not married) corrindex = corruption index (larger values indicate larger probability of being corrupt) income = average annual income of the politician (average over entire working life) allspeeches = string containing all speeches the politician has given in parliament
-
-Outcome Variables: 1. corrindex contains an index produced by an independent non-governmental institution (NGO), which is is supposed to measure how corrupt a politician is. The index has mean equal to zero, so positive (negative) values indicate that a politician is more (less) corrupt than the average politician. More precisely, the NGO argues that, under some assumptions, larger values of the index indicate a politician who is more likely to engage in corrupt behavior at some point during their political career.
-
-2.  The variable income measures average annual income of the politician from age 40 to age 50.
-
-Task: - To which extent does PARTY AFFILIATIOn affect CORRUPTION and INCOME -\> causal effect of PARTY AFFILIATION -\> Heterogeneity of causal effect (what TYPE of politician benefits more/less from PARTY AFFILIATION)
-
--   Explore two possibilities for establishing causality
-
-1.  Use ALLSPEECHES to control for the TYPE of politician -\> text may contain a signal about what kind of politician they are -\> may proxy for confounding variables (those that simultaneously affect PARTY AFFILITION and the Outcome)
-
-2.  Use BIRTHPLACE as an IV for PARTY AFFILIATION -\> speeches may not perfectly measure all confounders -\> endogeneity even conditional on the type
-
 # Strategy and To-Dos
-
-In General: (a) corrindex \~ PARTY + (age + birthplace + married) + TYPE OF POLITCIAN (b) income \~ PARTY + (age + birthplace + married) + TYPE OF POLITCIAN =\> as in (a) & (b) and with INTERACTION terms of PARTY with CONFOUNDERS
 
 Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN Done (i) .number_speeches = How Vocal is politician Done (ii) .speechlength = avg. length of speech (iii) generality = how many basic terms per speech (iv) content = TOPIC MODELLING by various indizes -\> may need to transform numerical corrindex and income into categorical
 
-Should numbers be dropped?
-
-Birthplace: - number indicating the region a speaker was born in =\> How to deal with it? - Categorical value, as values from 1 to 23 have no meaning, ranking etc, except lower values indicate rather type A and higher values rather type B affiliation with region, BUT only more or less Done - construct var. for dominance of a party, where values all positive, no distinguishing between A & B, the higher the values the less dominated a region is by a party, thus the more intense potential campaigns Done - construct var. for political direction of a region, e.g. 3 mostly party A, -3 mostly party B speaker
 
 # Install & Load Packages
 ```{r packages}
@@ -41,9 +20,8 @@ Birthplace: - number indicating the region a speaker was born in =\> How to deal
   #install.packages("wordcloud")
   #install.packages("patchwork")
   #install.packages("hdm")
-
-  #install.packages("AER")
-  library(AER)
+  #install.packages("grf")
+  #install.packages("topicmodels")
 
   library(tidyverse)
   library(tidytext)
@@ -53,6 +31,8 @@ Birthplace: - number indicating the region a speaker was born in =\> How to deal
   library(wordcloud)
   library(patchwork)
   library(hdm)
+  library(grf)
+  library(topicmodels)
 ```
 
 # Load Data
@@ -341,25 +321,41 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   
   # (4) Regularized Model - Double LASSO - lambda CV
   {
-    # Partial out confounders from outcome
-    model_dlcvregul_corrY <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Y_train))
-    fitted.lasso.Y <- predict(model_dlcvregul_corrY, newx=as.matrix(W_train), s="lambda.min")
+    # Partial out W (confounders) from Y (outcome)
+    fit.lasso.Y <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Y_train))
+    fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
     Ytilde_corr <- as.matrix(Y_train) - fitted.lasso.Y
     
-    # Partial out confounders from Party Affiliation
-    model_dlcvregul_corrD <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(D_train))
-    fitted.lasso.D <- predict(model_dlcvregul_corrD, newx=as.matrix(W_train), s="lambda.min")
+    # Partial out w(confounders) from D(Party Affiliation)
+    fit.lasso.D <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(D_train))
+    fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_train), s="lambda.min")
     Dtilde_corr <- as.matrix(D_train) - fitted.lasso.D
     
     # Run OLS of Ytilde on Dtilde
     fit.doubleLASSO <- lm(Ytilde_corr ~ Dtilde_corr)
     beta1hat <- coef(fit.doubleLASSO)[2]
     print(beta1hat)
-    }
+  }
+  
+  # (5) Regularized Model - Tree-based
+  {
+    test.forest <- causal_forest(as.matrix(W_train), as.matrix(Y_train), 
+                                 as.matrix(D_train), tune.parameters = "all")
+    
+    # Calculate the ATE:
+    average_treatment_effect(test.forest)
+    
+    # The function best_linear_projection returns estimates of the linear relation between
+    # the (conditional) ATE and the covariates. While we have no reason to assume that
+    # the relation is linear, it presents a good first step to investigate if heterogeneity
+    # is present and which variables appear to drive it.
+    blp <- best_linear_projection(test.forest, as.matrix(W_train))
+    blp
+  }
   
 }
 
-# Plotting of in-/out-of-sample fit
+# Plotting of in-/out-of-sample fit for models (1)-(3)
 {
   # Loop through each model in simplemodels_list
   for (i in seq_along(simplemodels_list)) {
@@ -423,14 +419,85 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
 }
 ```
 
-# Test Area (IV)
-Y = outcome
-W = vars not incl instruments
-D = endogeneous var
-Z = instrument
-```{r testarea}
+# Instrumental Variable
+```{r Instrumental Variable}
 # Normal IV (OLS does not work because too many variables due to all words contained), hence no residuals
 
+#Quadruple LASSO IV -because instrument is multinomial
+{
+  set.seed(12345)
+  # 1. Use LASSO to predict D with Z AND W
+  fit.lasso.Dpred <- cv.glmnet(y=as.matrix(D_train), as.matrix((cbind(Z_train, W_train))))
+  fitted.lasso.Dpred <- predict(fit.lasso.Dpred, newx=as.matrix((cbind(Z_train, W_train))), s="lambda.min")
+  
+  # 2. Use LASSO to partial out W
+  # (a) partial out W from Y - done above
+  #fit.lasso.Y <- cv.glmnet(as.matrix(W_train), as.matrix(Y_train))
+  #fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
+  #Ytilde <- as.matrix(Y_train) - fitted.lasso.Y
+  
+  # (b) partial out W from D - done above
+  #fit.lasso.D <- cv.glmnet(as.matrix(W_train), as.matrix(D_train))
+  #fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_train), s="lambda.min")
+  #Dtilde <- as.matrix(D_train) - fitted.lasso.D
+  
+  # (c) Partial out W from D_pred from 1.
+  fit.lasso.QDpred <- cv.glmnet(as.matrix(W_train), fitted.lasso.Dpred)
+  fitted.lasso.QDpred <- predict(fit.lasso.QDpred, newx=as.matrix(W_train), s="lambda.min")
+  QDpredtilde <- fitted.lasso.Dpred - fitted.lasso.QDpred
+  
+  # 3. Estimate IV coefficient
+  fit.QDLASSO.rf <- lm(Ytilde ~ QDpredtilde)
+  coef.QDLASSO.rf <- coef(fit.QDLASSO.rf)[2]
+  fit.QDLASSO.fs <- lm(Dtilde ~ QDpredtilde)
+  coef.QDLASSO.fs <- coef(fit.QDLASSO.fs)[2]		# first-stage coefficient
+  
+  beta1hat.QDLASSO <- coef.QDLASSO.rf / coef.QDLASSO.fs	# IV coefficient
+  beta1hat.QDLASSO
+
+  
+}
+```
+
+
+# Topic Modeling
+```{r topicmodel}
+speech_dtm <- data_unnested %>%
+  transmute(.wordtype = if(word_type == '.word'){.word}
+            else{wordStem(.word)}) %>%
+  rename(.word = .wordtype) %>%
+  filter(.word %in% words_to_keep) %>% # Take only words that are in previous created list
+  count(.speaker, .word) %>%
+  filter(n > 2) %>%
+  cast_dtm(.speaker, .word, n)
+
+topic_model <- LDA(speech_dtm, k=10, control=list(seed = 12345))
+save(topic_model, file = "topic_model.RData")
+load("./topic_model.RData")
+
+# obtain the topic-specific probability vectors theta_1,...,theta_K
+# (in the LDA output, these are denoted by "beta")
+speech_topics <- tidy(topic_model, matrix = "beta")
+
+# find top 10 terms in each topic
+speech_top_terms <- speech_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# plot topic-specific probabilities of the top words in each topic
+speech_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+# Triple IV
+```{r tripleIV}
 # TRIPLE LASSO IV- requires that Z is a scalar Instrument
 {
   # partial out W from Y
@@ -466,41 +533,6 @@ Z = instrument
   testpt <- rlassoIV(Y_train ~ D_train + W_train | Z_train + W_train, 
                    select.X = TRUE, select.Z = FALSE)
 "
-}
-
-#Quadruple LASSO IV -because instrument is multinomial
-{
-  set.seed(12345)
-  # 1. Use LASSO to predict D with Z AND W
-  fit.lasso.Dpred <- cv.glmnet(y=as.matrix(D_train), as.matrix((cbind(Z_train, W_train))))
-  fitted.lasso.Dpred <- predict(fit.lasso.Dpred, newx=as.matrix((cbind(Z_train, W_train))), s="lambda.min")
-  
-  # 2. Use LASSO to partial out W
-  # (a) partial out W from Y - done above
-  fit.lasso.Y <- cv.glmnet(as.matrix(W_train), as.matrix(Y_train))
-  fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
-  Ytilde <- as.matrix(Y_train) - fitted.lasso.Y
-  
-  # (b) partial out W from D - done above
-  fit.lasso.D <- cv.glmnet(as.matrix(W_train), as.matrix(D_train))
-  fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_train), s="lambda.min")
-  Dtilde <- as.matrix(D_train) - fitted.lasso.D
-  
-  # (c) Partial out W from D_pred from 1.
-  fit.lasso.QDpred <- cv.glmnet(as.matrix(W_train), fitted.lasso.Dpred)
-  fitted.lasso.QDpred <- predict(fit.lasso.QDpred, newx=as.matrix(W_train), s="lambda.min")
-  QDpredtilde <- fitted.lasso.Dpred - fitted.lasso.QDpred
-  
-  # 3. Estimate IV coefficient
-  fit.QDLASSO.rf <- lm(Ytilde ~ QDpredtilde)
-  coef.QDLASSO.rf <- coef(fit.QDLASSO.rf)[2]
-  fit.QDLASSO.fs <- lm(Dtilde ~ QDpredtilde)
-  coef.QDLASSO.fs <- coef(fit.QDLASSO.fs)[2]		# first-stage coefficient
-  
-  beta1hat.QDLASSO <- coef.QDLASSO.rf / coef.QDLASSO.fs	# IV coefficient
-  beta1hat.QDLASSO
-
-  
 }
 ```
 
