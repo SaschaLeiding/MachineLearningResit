@@ -289,6 +289,8 @@ rm(sentiment_dict)
 ```{r speechanalysis}
 # Set a seed to reconstruct analyses
 set.seed(12345)
+#y_var <- '.corrindex' # Choose between '.corrindex' or '.logincome'
+# y_var must be same in code-chunk 'prepspeechanalysis'
 
 # Change GGplot setting
 theme_update(plot.subtitle = element_text(hjust = 0.5))
@@ -315,141 +317,109 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   
   # Other
   simplemodels_list <- list()
-  #plots_simplemodels_fit <- list()
   in_sample_plots <- list()
   out_sample_plots <- list()
+  name_outcome <- ifelse(y_var == ".corrindex", "corr", "inc")
 }
 
-# TEST
-# (1) Simple Model - Linear Regression with all words
-simplemodels_list$model_comp_corr <- linear_reg() %>%
-  fit_xy(y = Y_train, x = X_train)
+# Estimation of Models
+{
+  # (1) Simple Model - Linear Regression with all words
+  simplemodels_list[[paste0("model_comp_", name_outcome)]]<- linear_reg() %>%
+    fit_xy(y = Y_train, x = X_train)
 
-# (2) Regularized Model - LASSO
-simplemodels_list$model_regul_corr <- linear_reg(penalty = 0.01, mixture = 1) %>%
-  set_engine('glmnet') %>%
-  fit_xy(y = Y_train, x = X_train)
+  # (2) Regularized Model - LASSO
+  simplemodels_list[[paste0("model_regul_", name_outcome)]]<- linear_reg(penalty = 0.01, mixture = 1) %>%
+    set_engine('glmnet') %>%
+    fit_xy(y = Y_train, x = X_train)
 
-# (3) Regularized Model - LASSO - lambda Cross-validated (CV)
-simplemodels_list$model_cvregul_corr <- cv.glmnet(x = as.matrix(X_train), y = as.matrix(Y_train),
-                                                  nfolds = 10, type.measure = "mse")
-
-# Loop through each model in simplemodels_list
-for (i in seq_along(simplemodels_list)) {
-  model <- simplemodels_list[[i]]
-  model_name <- names(simplemodels_list)[i]
-
-  # Check if the model is a cv.glmnet model
-  if (inherits(model, "cv.glmnet")) {
-    # For cv.glmnet, use lambda.min
-    predict_in_sample <- predict(model, newx = as.matrix(X_train), s = "lambda.min", type = "link")
-    predict_out_sample <- predict(model, newx = as.matrix(X_test), s = "lambda.min", type = "link")
-
-    # Plotting for cv.glmnet
-    plot_in_sample <- ggplot(data = (train %>% bind_cols(predict_in_sample)),
-                             aes(x = lambda.min, y = .corrindex)) +
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-
-    plot_out_sample <- ggplot(data = (test %>% bind_cols(predict_out_sample)),
-                              aes(x = lambda.min, y = .corrindex)) +  
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-  } else {
-    # For other models
-    predict_in_sample <- predict(model, X_train)
-    predict_out_sample <- predict(model, new_data = X_test)
-
-    # Common code for plotting fits
-    plot_in_sample <- ggplot(data = (train %>% bind_cols(predict_in_sample)),
-                             aes(x = .pred, y = .corrindex)) +
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-
-    plot_out_sample <- ggplot(data = (test %>% bind_cols(predict_out_sample)),
-                              aes(x = .pred, y = .corrindex)) +  
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-  }
-
-  # Store combined in-sample and out-of-sample plots
-  in_sample_plots[[model_name]] <- plot_in_sample
-  out_sample_plots[[model_name]] <- plot_out_sample
-}
+  # (3) Regularized Model - LASSO - lambda Cross-validated (CV)
+  simplemodels_list[[paste0("model_cvregul_", name_outcome)]]<- cv.glmnet(x = as.matrix(X_train), 
+                                                    y = as.matrix(Y_train),
+                                                    nfolds = 10, 
+                                                    type.measure = "mse")
   
-combined_plots <- (Reduce('+', in_sample_plots) / Reduce('+', out_sample_plots)) +
-  plot_layout(guides = 'collect')
+  # (4) Regularized Model - Double LASSO - lambda CV
+  {
+    # Partial out confounders from outcome
+    model_dlcvregul_corrY <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Y_train))
+    fitted.lasso.Y <- predict(model_dlcvregul_corrY, newx=as.matrix(W_train), s="lambda.min")
+    Ytilde_corr <- as.matrix(Y_train) - fitted.lasso.Y
+    
+    # Partial out confounders from Party Affiliation
+    model_dlcvregul_corrD <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(D_train))
+    fitted.lasso.D <- predict(model_dlcvregul_corrD, newx=as.matrix(W_train), s="lambda.min")
+    Dtilde_corr <- as.matrix(D_train) - fitted.lasso.D
+    
+    # Run OLS of Ytilde on Dtilde
+    fit.doubleLASSO <- lm(Ytilde_corr ~ Dtilde_corr)
+    beta1hat <- coef(fit.doubleLASSO)[2]
+    print(beta1hat)
+    }
+  
+}
 
-label_plots <- map((c("OLS", "LASSO", "LASSO CV")), ~ ggplot() + 
-                    theme_void() + 
-                    theme(plot.margin = margin(0, 0, 0, 0)) + 
-                    annotate("text", x = 0.5, y = 0.5, label = .x, fontface = "bold", hjust = 0.5))
+# Plotting of in-/out-of-sample fit
+{
+  # Loop through each model in simplemodels_list
+  for (i in seq_along(simplemodels_list)) {
+    model <- simplemodels_list[[i]]
+    model_name <- names(simplemodels_list)[i]
 
-final_plot <- ((label_plots[[1]] | label_plots[[2]] | label_plots[[3]]) / combined_plots) +
-  plot_layout(heights = c(1, 10))
-
-print(final_plot) 
+    # Check if the model is a cv.glmnet model
+    if (inherits(model, "cv.glmnet")) {
+      # For cv.glmnet, use lambda.min
+      predict_in_sample <- predict(model, newx = as.matrix(X_train), s = "lambda.min", type = "link")
+      predict_out_sample <- predict(model, newx = as.matrix(X_test), s = "lambda.min", type = "link")
 
       
-# (3) Regularized Model - LASSO - lambda Cross-validated(CV)
-{
-    model_cvregul_corr <- cv.glmnet(x=as.matrix(X_train), y=as.matrix(Y_train), # Input
-                                    nfolds=10, # Number of folds to CV
-                                    type.measure = "mse") # the measure used to optimize CV
-    plot(model_cvregul_corr) # 1st dot-line gives the min MSE from CV while 2nd gives most regularized model
-    print(model_cvregul_corr) #Prints: Lambda, the index of which lambdas (position), the measure value to optimize CV, SE, number of nonzero coefficients
-    model_cvregul_corr$lambda.min
+      # Plotting for cv.glmnet
+      plot_in_sample <- ggplot(data = (train %>% bind_cols(predict_in_sample)),
+                               aes(x = lambda.min, y = .corrindex)) +
+        geom_point() +
+        geom_abline(intercept = 0, slope = 1, size = 0.5) +
+        labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+      
+      plot_out_sample <- ggplot(data = (test %>% bind_cols(predict_out_sample)),
+                              aes(x = lambda.min, y = .corrindex)) +  
+        geom_point() +
+        geom_abline(intercept = 0, slope = 1, size = 0.5) +
+        labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+      } else {
+        # For other models
+        predict_in_sample <- predict(model, X_train)
+        predict_out_sample <- predict(model, new_data = X_test)
         
-    # Extract non-zero coefficients at lambda.min
-    non_zero_coefficients <- as.data.frame(as.matrix(coef(model_cvregul_corr, s = "lambda.min"))) %>%
-      filter(.[[1]] != 0)
-    print(non_zero_coefficients)
+        # Common code for plotting fits
+        plot_in_sample <- ggplot(data = (train %>% bind_cols(predict_in_sample)),
+                                 aes(x = .pred, y = .corrindex)) +
+          geom_point() +
+          geom_abline(intercept = 0, slope = 1, size = 0.5) +
+          labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+        
+        plot_out_sample <- ggplot(data = (test %>% bind_cols(predict_out_sample)),
+                                  aes(x = .pred, y = .corrindex)) +
+          geom_point() +
+          geom_abline(intercept = 0, slope = 1, size = 0.5) +
+          labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+        }
     
-    # Create Wordcloud with non-zero regularized words
-    {
-      wordcloud(words = rownames(non_zero_coefficients)[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
-                                                  !grepl("^\\.", rownames(non_zero_coefficients))],
-              freq=non_zero_coefficients[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
-                                   !grepl("^\\.", rownames(non_zero_coefficients)), ])
+    # Store combined in-sample and out-of-sample plots
+    in_sample_plots[[model_name]] <- plot_in_sample
+    out_sample_plots[[model_name]] <- plot_out_sample
     }
-}
-
-# Merge in-/ and out-of-sample fit Plots
-{
- combined_plots <- combined_plots + plot_layout(guides = 'collect')
-
-label_plots <- map((c("OLS", "LASSO", "LASSO CV")), ~ ggplot() + 
-                    theme_void() + 
-                    theme(plot.margin = margin(0, 0, 0, 0)) + 
-                    annotate("text", x = 0.5, y = 0.5, label = .x, fontface = "bold", hjust = 0.5))
-
-final_plot <- ((label_plots[[1]] | label_plots[[2]] | label_plots[[3]]) / combined_plots) +
-  plot_layout(heights = c(1, 10))
-
-print(final_plot) 
-}
-
-# (4) Regularized Model - Double LASSO
-# To-do: DISTINGUISH BETWEEN TRAIN and TEST?
-{
-  # Partial out confounders from outcome
-  model_dlcvregul_corrY <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Y_train))
-  fitted.lasso.Y <- predict(model_dlcvregul_corrY, newx=as.matrix(W_train), s="lambda.min")
-  Ytilde_corr <- as.matrix(Y_train) - fitted.lasso.Y
   
-  # Partial out confounders from Party Affiliation
-  model_dlcvregul_corrD <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(D_train))
-  fitted.lasso.D <- predict(model_dlcvregul_corrD, newx=as.matrix(W_train), s="lambda.min")
-  Dtilde_corr <- as.matrix(D_train) - fitted.lasso.D
+  combined_plots <- (Reduce('+', in_sample_plots) / Reduce('+', out_sample_plots)) +
+    plot_layout(guides = 'collect')
   
-  # Run OLS of Ytilde on Dtilde
-  fit.doubleLASSO <- lm(Ytilde_corr ~ Dtilde_corr)
-	beta1hat <- coef(fit.doubleLASSO)[2]
-	print(beta1hat)
+  label_plots <- map((c("OLS", "LASSO", "LASSO CV")), ~ ggplot() +
+                       theme_void() +
+                       theme(plot.margin = margin(0, 0, 0, 0)) +
+                       annotate("text", x = 0.5, y = 0.5, label = .x, fontface = "bold", hjust = 0.5))
+  
+  final_plot <- ((label_plots[[1]] | label_plots[[2]] | label_plots[[3]]) / combined_plots) +
+    plot_layout(heights = c(1, 10))
+  print(final_plot)
 }
 ```
 
@@ -461,7 +431,7 @@ Z = instrument
 ```{r testarea}
 # Normal IV (OLS does not work because too many variables due to all words contained), hence no residuals
 
-# TRIPLE - LASSO IV
+# TRIPLE LASSO IV- requires that Z is a scalar Instrument
 {
   # partial out W from Y
     fit.lasso.Y <- cv.glmnet(as.matrix(W_train), as.matrix(Y_train))
@@ -502,8 +472,8 @@ Z = instrument
 {
   set.seed(12345)
   # 1. Use LASSO to predict D with Z AND W
-  fit.QDlasso.D <- cv.glmnet(y=as.matrix(D_train), as.matrix((cbind(Z_train, W_train))))
-  fitted.QDlasso.D <- predict(fit.QDlasso.D, newx=as.matrix((cbind(Z_train, W_train))), s="lambda.min")
+  fit.lasso.Dpred <- cv.glmnet(y=as.matrix(D_train), as.matrix((cbind(Z_train, W_train))))
+  fitted.lasso.Dpred <- predict(fit.lasso.Dpred, newx=as.matrix((cbind(Z_train, W_train))), s="lambda.min")
   
   # 2. Use LASSO to partial out W
   # (a) partial out W from Y - done above
@@ -517,14 +487,14 @@ Z = instrument
   Dtilde <- as.matrix(D_train) - fitted.lasso.D
   
   # (c) Partial out W from D_pred from 1.
-  fit.QDlasso.QD <- cv.glmnet(as.matrix(W_train), fitted.QDlasso.D)
-  fitted.QDlasso.QD <- predict(fit.QDlasso.QD, newx=as.matrix(W_train), s="lambda.min")
-  QDtilde <- fitted.QDlasso.D - fitted.QDlasso.QD
+  fit.lasso.QDpred <- cv.glmnet(as.matrix(W_train), fitted.lasso.Dpred)
+  fitted.lasso.QDpred <- predict(fit.lasso.QDpred, newx=as.matrix(W_train), s="lambda.min")
+  QDpredtilde <- fitted.lasso.Dpred - fitted.lasso.QDpred
   
   # 3. Estimate IV coefficient
-  fit.QDLASSO.rf <- lm(Ytilde ~ QDtilde)
+  fit.QDLASSO.rf <- lm(Ytilde ~ QDpredtilde)
   coef.QDLASSO.rf <- coef(fit.QDLASSO.rf)[2]
-  fit.QDLASSO.fs <- lm(Dtilde ~ QDtilde)
+  fit.QDLASSO.fs <- lm(Dtilde ~ QDpredtilde)
   coef.QDLASSO.fs <- coef(fit.QDLASSO.fs)[2]		# first-stage coefficient
   
   beta1hat.QDLASSO <- coef.QDLASSO.rf / coef.QDLASSO.fs	# IV coefficient
