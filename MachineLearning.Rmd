@@ -315,7 +315,7 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   
   # Other
   simplemodels_list <- list()
-  plots_simplemodels_fit <- list()
+  #plots_simplemodels_fit <- list()
   in_sample_plots <- list()
   out_sample_plots <- list()
 }
@@ -394,71 +394,6 @@ final_plot <- ((label_plots[[1]] | label_plots[[2]] | label_plots[[3]]) / combin
 
 print(final_plot) 
 
-
-# (1) Complex Model - Overfitting
-{
-  # Linear Regression with all words
-  model_comp_corr <- linear_reg () %>%
-    fit_xy(y=Y_train, x=X_train)
-      
-  # Plot Fits
-  {
-    # Plot in-sample Fit
-    plot_fit_comp_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_comp_corr, X_train))),
-                                    aes(x = .pred, y = .corrindex)) +
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-
-    # Plot out-of-sample fit
-    plot_fit_comp_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_comp_corr, new_data=X_test))),
-                                     aes(x = .pred, y = .corrindex)) +  
-        geom_point() +
-        geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-  }
-      
-  # Plot Words most strongly correlated
-  tidy(model_comp_corr)
-}
-    
-# (2) Regularized Model - LASSO - lambda 0.1
-{
-  # Linear regression with LASSO penalty
-  model_regul_corr <- linear_reg(penalty = 0.01, mixture = 1) %>%
-    set_engine('glmnet') %>%
-    fit_xy(y=Y_train, x=X_train)
-
-  # Plot Fits
-  {
-    #Plot in-sample fit
-    plot_fit_regul_corr_in <- ggplot(data = (train %>% bind_cols(predict(model_regul_corr, X_train))),
-                                     aes(x = .pred, y = .corrindex)) + 
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-
-    # Plot out-of-sample fit
-    plot_fit_regul_corr_out <- ggplot(data = (test %>% bind_cols(predict(model_regul_corr, X_test))),
-                                      aes(x = .pred, y = .corrindex)) + 
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-  }
-      
-  # Plot most important words
-  {
-    tidy(model_regul_corr) %>%
-      filter(estimate >= 1000) %>%
-      ggplot(aes(x = estimate,
-                 y = fct_reorder(term, estimate, .desc = TRUE))) +
-      geom_col()
-    
-    wordcloud(words = tidy(model_regul_corr)$term,
-              freq = tidy(model_regul_corr)$estimate,
-              max.words = 100)
-  }
-}
       
 # (3) Regularized Model - LASSO - lambda Cross-validated(CV)
 {
@@ -480,27 +415,6 @@ print(final_plot)
                                                   !grepl("^\\.", rownames(non_zero_coefficients))],
               freq=non_zero_coefficients[!rownames(non_zero_coefficients) %in% '(Intercept)' & 
                                    !grepl("^\\.", rownames(non_zero_coefficients)), ])
-    }
-    
-    # Plot Fit
-    {
-      # Plot in-sample fit
-      plot_fit_cvregul_corr_in <- ggplot(data = (train %>% 
-                                                   bind_cols(predict(model_cvregul_corr, newx=as.matrix(X_train),
-                                                                     s="lambda.min", type="link"))),
-                                     aes(x = lambda.min, y = .corrindex)) + 
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
-      
-    # Plot out_of-sample fit
-      plot_fit_cvregul_corr_out <- ggplot(data = (test %>% 
-                                                   bind_cols(predict(model_cvregul_corr, newx=as.matrix(X_test),
-                                                                     s="lambda.min", type="link"))),
-                                     aes(x = lambda.min, y = .corrindex)) + 
-      geom_point() +
-      geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
     }
 }
 
@@ -547,8 +461,9 @@ Z = instrument
 ```{r testarea}
 # Normal IV (OLS does not work because too many variables due to all words contained), hence no residuals
 
-# LASSO IV
-# partial out W from Y
+# TRIPLE - LASSO IV
+{
+  # partial out W from Y
     fit.lasso.Y <- cv.glmnet(as.matrix(W_train), as.matrix(Y_train))
     fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
     Ytilde <- as.matrix(Y_train) - fitted.lasso.Y
@@ -559,32 +474,10 @@ Z = instrument
   Dtilde <- as.matrix(D_train) - fitted.lasso.D
 
 # partial out W from Z
-    fit.lasso.Z <- cv.glmnet(as.matrix(W_train), as.matrix(Z_train))
-    print(dim(W_train))
-print(dim(Z_train))
-
-# Check for NA values
-print(sum(is.na(W_train)))
-print(sum(is.na(Z_train)))
-    fitted.lasso.Z <- predict(fit.lasso.Z, newx=as.matrix(W_train), s="lambda.min")
-    Ztilde <- as.matrix(Z_train) - fitted.lasso.Z
-
-
-
-# partial out W from Y
-    fit.lasso.Y <- cv.glmnet(W, Y)
-    fitted.lasso.Y <- predict(fit.lasso.Y, newx=W, s="lambda.min")
-    Ytilde <- Y - fitted.lasso.Y
-
-    # partial out W from D
-    fit.lasso.D <- cv.glmnet(W, D)
-    fitted.lasso.D <- predict(fit.lasso.D, newx=W, s="lambda.min")
-    Dtilde <- D - fitted.lasso.D
-
-    # partial out W from Z
-    fit.lasso.Z <- cv.glmnet(W, Z)
-    fitted.lasso.Z <- predict(fit.lasso.Z, newx=W, s="lambda.min")
-    Ztilde <- Z - fitted.lasso.Z
+# THIS COMPUTATION TAKES SEVERAL MINUTES
+    fit.lasso.Z <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Z_train), family="multinomial")
+    fitted.lasso.Z <- predict(fit.lasso.Z, newx=as.matrix(W_train), s="lambda.min", type ="link")
+    Ztilde <- as.matrix(Z_train) - apply(fitted.lasso.Z, 2, c)
 
     # run IV on residuals
     fit.tripleLASSO.rf <- lm(Ytilde~Ztilde)
@@ -594,5 +487,50 @@ print(sum(is.na(Z_train)))
      
     beta1hat.tripleLASSO <- coef.tripleLASSO.rf / coef.tripleLASSO.fs	# IV coefficient
     beta1hat.tripleLASSO
+    
+  "
+  rlassoIV takes more than 30min and could not be finally processed with 16k variables,
+  works however when fewer variables are taken.
+  testpt <- rlassoIVmult(x=as.matrix(X_train), d=as.matrix(D_train), y=as.matrix(Y_train),
+                       z=as.matrix(Z_train), select.Z=FALSE, select.X=TRUE)
+  testpt <- rlassoIV(Y_train ~ D_train + W_train | Z_train + W_train, 
+                   select.X = TRUE, select.Z = FALSE)
+"
+}
+
+#Quadruple LASSO IV -because instrument is multinomial
+{
+  set.seed(12345)
+  # 1. Use LASSO to predict D with Z AND W
+  fit.QDlasso.D <- cv.glmnet(y=as.matrix(D_train), as.matrix((cbind(Z_train, W_train))))
+  fitted.QDlasso.D <- predict(fit.QDlasso.D, newx=as.matrix((cbind(Z_train, W_train))), s="lambda.min")
+  
+  # 2. Use LASSO to partial out W
+  # (a) partial out W from Y - done above
+  fit.lasso.Y <- cv.glmnet(as.matrix(W_train), as.matrix(Y_train))
+  fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
+  Ytilde <- as.matrix(Y_train) - fitted.lasso.Y
+  
+  # (b) partial out W from D - done above
+  fit.lasso.D <- cv.glmnet(as.matrix(W_train), as.matrix(D_train))
+  fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_train), s="lambda.min")
+  Dtilde <- as.matrix(D_train) - fitted.lasso.D
+  
+  # (c) Partial out W from D_pred from 1.
+  fit.QDlasso.QD <- cv.glmnet(as.matrix(W_train), fitted.QDlasso.D)
+  fitted.QDlasso.QD <- predict(fit.QDlasso.QD, newx=as.matrix(W_train), s="lambda.min")
+  QDtilde <- fitted.QDlasso.D - fitted.QDlasso.QD
+  
+  # 3. Estimate IV coefficient
+  fit.QDLASSO.rf <- lm(Ytilde ~ QDtilde)
+  coef.QDLASSO.rf <- coef(fit.QDLASSO.rf)[2]
+  fit.QDLASSO.fs <- lm(Dtilde ~ QDtilde)
+  coef.QDLASSO.fs <- coef(fit.QDLASSO.fs)[2]		# first-stage coefficient
+  
+  beta1hat.QDLASSO <- coef.QDLASSO.rf / coef.QDLASSO.fs	# IV coefficient
+  beta1hat.QDLASSO
+
+  
+}
 ```
 
