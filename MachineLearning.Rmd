@@ -566,43 +566,4 @@ speech_top_terms %>%
   coord_flip()
 ```
 
-# Triple IV
-```{r tripleIV}
-# TRIPLE LASSO IV- requires that Z is a scalar Instrument
-{
-  # partial out W from Y
-    fit.lasso.Y <- cv.glmnet(as.matrix(W_train), as.matrix(Y_train))
-    fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
-    Ytilde <- as.matrix(Y_train) - fitted.lasso.Y
-
-# partial out W from D
-  fit.lasso.D <- cv.glmnet(as.matrix(W_train), as.matrix(D_train))
-  fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_train), s="lambda.min")
-  Dtilde <- as.matrix(D_train) - fitted.lasso.D
-
-# partial out W from Z
-# THIS COMPUTATION TAKES SEVERAL MINUTES
-    fit.lasso.Z <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Z_train), family="multinomial")
-    fitted.lasso.Z <- predict(fit.lasso.Z, newx=as.matrix(W_train), s="lambda.min", type ="link")
-    Ztilde <- as.matrix(Z_train) - apply(fitted.lasso.Z, 2, c)
-
-    # run IV on residuals
-    fit.tripleLASSO.rf <- lm(Ytilde~Ztilde)
-    coef.tripleLASSO.rf <- coef(fit.tripleLASSO.rf)[2]		# reduced-form coefficient
-    fit.tripleLASSO.fs <- lm(Dtilde~Ztilde)
-    coef.tripleLASSO.fs <- coef(fit.tripleLASSO.fs)[2]		# first-stage coefficient
-     
-    beta1hat.tripleLASSO <- coef.tripleLASSO.rf / coef.tripleLASSO.fs	# IV coefficient
-    beta1hat.tripleLASSO
-    
-  "
-  rlassoIV takes more than 30min and could not be finally processed with 16k variables,
-  works however when fewer variables are taken.
-  testpt <- rlassoIVmult(x=as.matrix(X_train), d=as.matrix(D_train), y=as.matrix(Y_train),
-                       z=as.matrix(Z_train), select.Z=FALSE, select.X=TRUE)
-  testpt <- rlassoIV(Y_train ~ D_train + W_train | Z_train + W_train, 
-                   select.X = TRUE, select.Z = FALSE)
-"
-}
-```
 
