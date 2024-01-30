@@ -22,6 +22,7 @@ Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN Done (i) .number_speech
   #install.packages("hdm")
   #install.packages("grf")
   #install.packages("topicmodels")
+  #install.packages("SnowballC")
 
   library(tidyverse)
   library(tidytext)
@@ -33,6 +34,8 @@ Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN Done (i) .number_speech
   library(hdm)
   library(grf)
   library(topicmodels)
+  library(SnowballC)
+
 ```
 
 # Load Data
@@ -60,7 +63,7 @@ Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN Done (i) .number_speech
            .logincome = log(.income)) %>% # Transform income into log
     group_by(.birthplace) %>%
     # ASSUMPTION: all politicians within a birthplace are included in the data, or distribution and choice of entries are representative for a region
-    mutate(.regionideology = sum(.party == 'A') - sum(.party == 'B'), # Identify Ideological tendence for each region
+    mutate(.regionideology = sum(.party == 'A') - sum(.party == 'B'), # Identify Ideological tendency for each region
            .regionintensity = 1 - sum(.party == ifelse(sum(.party == 'A') > sum(.party == 'B'), 'A', 'B')) / n())  %>% # Identify the more prevalent party and calculate the ratio
     ungroup()
   
@@ -195,13 +198,13 @@ rm(sentiment_dict)
   # Define variables
   y_var <- '.corrindex' # Choose between '.corrindex' or '.logincome'
   word_type <- '.word' # Choose between '.word' or '.stem'
-  
-  
+
   # pick the words to keep as predictors
   # Need to choose between taking full words or word stems only (words = 16.6k vs. stem = 12k entries)
   {
-    words_to_keep <- unique(data_unnested %>% # Drop double entries (drops words from 484k to 17k)
-                              anti_join(get_stopwords(), join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself...
+    words_to_keep <- unique(data_unnested %>% # Drop double entries (drops words from 484k to 16,603) with smart to 16,280 and .stem dropping to 12,030
+                              anti_join(get_stopwords(source="smart"), # standard=175 words vs, smart 571 words
+                                        join_by(.word  == word)) %>% # Drop words that are in dictionary stopwords, e.g.: I , me, my, myself...
                               mutate(.wordtype = if(word_type == '.word'){.word}
                                      else{wordStem(.word)}) %>%
                               count(.wordtype) %>%
@@ -259,8 +262,8 @@ rm(sentiment_dict)
   # Remove dataset and clear memory for computation
   {
     rm(data_split)
-    rm(data_unnested)
-    rm(words_to_keep)
+    #rm(data_unnested)
+    #rm(words_to_keep)
     gc()
   }
 ```
@@ -294,6 +297,7 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   D_test <- test['.partydummy'] # Target Parameter
   Z_test <- test %>% select(starts_with(".birthplace") & !(".birthplace")) # Instrument
   X_test <- cbind(D_test, Z_test, W_test) # Observed Regressors - 16,635 variables
+
   
   # Other
   simplemodels_list <- list()
@@ -302,14 +306,19 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   name_outcome <- ifelse(y_var == ".corrindex", "corr", "inc")
 }
 
-# Estimation of Models
+# Estimation of Treatment Effect
 {
   # (1) Simple Model - Linear Regression with all words
   simplemodels_list[[paste0("model_comp_", name_outcome)]]<- linear_reg() %>%
     fit_xy(y = Y_train, x = X_train)
+  pppp <- simplemodels_list[[paste0("model_comp_", name_outcome)]] %>% 
+    extract_fit_engine() %>%
+    summary()
+  coef(pppp)
 
   # (2) Regularized Model - LASSO
-  simplemodels_list[[paste0("model_regul_", name_outcome)]]<- linear_reg(penalty = 0.01, mixture = 1) %>%
+  simplemodels_list[[paste0("model_regul_", name_outcome)]]<- linear_reg(penalty = 0.01, # Amount of Regularization (lambda)
+                                                                         mixture = 1) %>% # Pure LASSO model
     set_engine('glmnet') %>%
     fit_xy(y = Y_train, x = X_train)
 
@@ -338,6 +347,8 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   }
   
   # (5) Regularized Model - Tree-based
+      # First estimate propensity scores
+      #propensity.forest <- regression_forest(X_forest, W)
   {
     test.forest <- causal_forest(as.matrix(W_train), as.matrix(Y_train), 
                                  as.matrix(D_train), tune.parameters = "all")
@@ -417,6 +428,60 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
     plot_layout(heights = c(1, 10))
   print(final_plot)
 }
+
+# Estimation of Heterogeneity
+{
+  # Extract non-zero coefficients from Regularizing models
+  {
+    words_hetero <- c()
+    # (2) LASSO - lambda = 0.1
+    words_hetero <- append(words_hetero,
+                           tidy(simplemodels_list[[paste0("model_regul_", name_outcome)]]) %>%
+                             filter(estimate != 0 & !grepl("^\\.", term)) %>% 
+                             pull(term))
+    
+    # (3) LASSO - lambda =CV
+    words_hetero <- append(words_hetero,
+                           as.data.frame(as.matrix(coef(simplemodels_list[[paste0("model_cvregul_", name_outcome)]], 
+                                  s = "lambda.min"))) %>% 
+                             tibble::rownames_to_column(var = "term") %>%
+                             filter(s1 != 0 & !grepl("^\\.", term)) %>%
+                             pull(term))
+
+    # (4) Double LASSO --- fit.lasso.D; fit.lasso.Y
+    words_hetero <- append(words_hetero,
+                           as.data.frame(as.matrix(coef(fit.lasso.D, s = "lambda.min"))) %>%
+                             tibble::rownames_to_column(var = "term") %>%
+                             filter(s1 != 0 & !grepl("^\\.", term)) %>%
+                             pull(term))
+    words_hetero <- append(words_hetero,
+                           as.data.frame(as.matrix(coef(fit.lasso.Y, s = "lambda.min"))) %>%
+                             tibble::rownames_to_column(var = "term") %>%
+                             filter(s1 != 0 & !grepl("^\\.", term)) %>%
+                             pull(term))
+
+    # (5) Causal Forest
+    words_hetero <- append(words_hetero,
+                           data.frame(term = colnames(W_train),
+                                      importance = variable_importance(forest = test.forest,
+                                                                       max.depth = 1)) %>%
+      filter(importance != 0 & !grepl("^\\.", term)) %>%
+        pull(term))
+    
+    words_hetero <- setdiff(unique(words_hetero), "(Intercept)")
+  }
+   
+  # Create  Interaction terms of .partydummy with all ppx
+  pppx <- X_train %>% select(starts_with("."), all_of(words_hetero))
+  pppx_interacted <- pppx %>% 
+    mutate(across(everything(), ~ . * .partydummy, .names = ".partydummyx{.col}")) %>%
+    select(where(~ var(.) != 0)) # drop all columns where there is no variation
+
+  pppt <- rlassoEffects(x = (X_train %>% 
+                               select(starts_with("."), all_of(words_hetero))),
+                         y = Y_train)
+  
+}
 ```
 
 # Instrumental Variable
@@ -462,22 +527,28 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
 
 # Topic Modeling
 ```{r topicmodel}
+save(topic_model, file = "topic_model.RData")
+save(topic_model_22, file = "topic_model_22.RData")
+
+load("./topic_model.RData")
+
+special_list <- c("hon", "government", "people", "mr", "mrs", "one", "can", 
+                  "also","member", "members", "house", "commitee")
 speech_dtm <- data_unnested %>%
   transmute(.wordtype = if(word_type == '.word'){.word}
             else{wordStem(.word)}) %>%
   rename(.word = .wordtype) %>%
   filter(.word %in% words_to_keep) %>% # Take only words that are in previous created list
   count(.speaker, .word) %>%
-  filter(n > 2) %>%
+  filter(n > 2 & nchar(.word) > 2 & !(.word %in% special_list)) %>% # words that occurred more than two times
+  #filter(nchar(.word) > 2) %>% # words that have more than two characters
   cast_dtm(.speaker, .word, n)
 
-topic_model <- LDA(speech_dtm, k=10, control=list(seed = 12345))
-save(topic_model, file = "topic_model.RData")
-load("./topic_model.RData")
+topic_model_22 <- LDA(speech_dtm, k=22, control=list(seed = 12345))
 
 # obtain the topic-specific probability vectors theta_1,...,theta_K
 # (in the LDA output, these are denoted by "beta")
-speech_topics <- tidy(topic_model, matrix = "beta")
+speech_topics <- tidy(topic_model_22, matrix = "beta")
 
 # find top 10 terms in each topic
 speech_top_terms <- speech_topics %>%
@@ -493,7 +564,6 @@ speech_top_terms %>%
   geom_col(show.legend = FALSE) +
   facet_wrap(~ topic, scales = "free") +
   coord_flip()
-
 ```
 
 # Triple IV
