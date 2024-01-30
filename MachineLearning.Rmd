@@ -249,7 +249,6 @@ rm(sentiment_dict)
   }
   
   # Create train and test sample from data merge with Term Frequency
-  # NEED TO JUSTIFY 08. - 0.2 division
   # Too little data for stratification by BIRTHPLACE
   {
     # split sample into training and test sample
@@ -297,7 +296,13 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   D_test <- test['.partydummy'] # Target Parameter
   Z_test <- test %>% select(starts_with(".birthplace") & !(".birthplace")) # Instrument
   X_test <- cbind(D_test, Z_test, W_test) # Observed Regressors - 16,635 variables
-
+  
+  # Full Data
+  Y_full <- tidy_speech[y_var] # Outcome Variable
+  W_full <- tidy_speech[, !(colnames(tidy_speech) %in% confounder_names)] # Covariates - Nuisance Parameters
+  D_full <- tidy_speech['.partydummy'] # Target Parameter
+  Z_full <- tidy_speech %>% select(starts_with(".birthplace") & !(".birthplace")) # Instrument
+  X_full <- cbind(D_full, Z_full, W_full) # Observed Regressors - 16,635 variables
   
   # Other
   simplemodels_list <- list()
@@ -306,15 +311,11 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
   name_outcome <- ifelse(y_var == ".corrindex", "corr", "inc")
 }
 
-# Estimation of Treatment Effect
+# 2.1 Identifying important Words/variables to control for type of politician
 {
   # (1) Simple Model - Linear Regression with all words
   simplemodels_list[[paste0("model_comp_", name_outcome)]]<- linear_reg() %>%
     fit_xy(y = Y_train, x = X_train)
-  pppp <- simplemodels_list[[paste0("model_comp_", name_outcome)]] %>% 
-    extract_fit_engine() %>%
-    summary()
-  coef(pppp)
 
   # (2) Regularized Model - LASSO
   simplemodels_list[[paste0("model_regul_", name_outcome)]]<- linear_reg(penalty = 0.01, # Amount of Regularization (lambda)
@@ -327,6 +328,20 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
                                                     y = as.matrix(Y_train),
                                                     nfolds = 10, 
                                                     type.measure = "mse")
+  
+  # (4) Regression forest
+  propensity.forest <- regression_forest(X= as.matrix(cbind(Z_full, W_full)),
+                                         Y= as.matrix(D_full))
+  
+  # Predict probability of treatment assignment for each value:
+  propensity.hat <- predict(propensity.forest)
+  propensity.importance <- variable_importance(propensity.forest)
+  propensity.importance.cols <- order(propensity.importance, decreasing = TRUE)
+  colnames(ZW_full)[propensity.importance.cols]
+  
+  
+  
+  ###CUTOFF####
   
   # (4) Regularized Model - Double LASSO - lambda CV
   {
