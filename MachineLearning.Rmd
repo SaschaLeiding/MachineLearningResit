@@ -329,59 +329,24 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
                                                     nfolds = 10, 
                                                     type.measure = "mse")
   
-  # (4) Regression forest
-  propensity.forest <- regression_forest(X= as.matrix(cbind(Z_full, W_full)),
+  # (4) Regression forest for Propensity
+  ZW_full <- cbind(Z_full, W_full)
+  propensity.forest <- regression_forest(X= ZW_full,
                                          Y= as.matrix(D_full))
   
   # Predict probability of treatment assignment for each value:
   propensity.hat <- predict(propensity.forest)
   propensity.importance <- variable_importance(propensity.forest)
   propensity.importance.cols <- order(propensity.importance, decreasing = TRUE)
-  colnames(ZW_full)[propensity.importance.cols]
+  colnames(ZW_full)[propensity.importance.cols][1:24] # Print out 10 most imp. variables
   
-  
-  
-  ###CUTOFF####
-  
-  # (4) Regularized Model - Double LASSO - lambda CV
-  {
-    # Partial out W (confounders) from Y (outcome)
-    fit.lasso.Y <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Y_train))
-    fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
-    Ytilde_corr <- as.matrix(Y_train) - fitted.lasso.Y
-    
-    # Partial out w(confounders) from D(Party Affiliation)
-    fit.lasso.D <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(D_train))
-    fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_train), s="lambda.min")
-    Dtilde_corr <- as.matrix(D_train) - fitted.lasso.D
-    
-    # Run OLS of Ytilde on Dtilde
-    fit.doubleLASSO <- lm(Ytilde_corr ~ Dtilde_corr)
-    beta1hat <- coef(fit.doubleLASSO)[2]
-    print(beta1hat)
-  }
-  
-  # (5) Regularized Model - Tree-based
-      # First estimate propensity scores
-      #propensity.forest <- regression_forest(X_forest, W)
-  {
-    test.forest <- causal_forest(as.matrix(W_train), as.matrix(Y_train), 
-                                 as.matrix(D_train), tune.parameters = "all")
-    
-    # Calculate the ATE:
-    average_treatment_effect(test.forest)
-    
-    # The function best_linear_projection returns estimates of the linear relation between
-    # the (conditional) ATE and the covariates. While we have no reason to assume that
-    # the relation is linear, it presents a good first step to investigate if heterogeneity
-    # is present and which variables appear to drive it.
-    blp <- best_linear_projection(test.forest, as.matrix(W_train))
-    blp
-  }
-  
-}
+  plot_hist_propensity <- hist(propensity.hat[, "predictions"], 
+                               main = "Estimate of propensity score distribution", 
+                               xlab = "Propensity score")
+  ZW_full$p.hat <- propensity.hat$predictions
+} 
 
-# Plotting of in-/out-of-sample fit for models (1)-(3)
+# 2.1 Plotting of in-/out-of-sample fit for models (1)-(3)
 {
   # Loop through each model in simplemodels_list
   for (i in seq_along(simplemodels_list)) {
@@ -443,8 +408,49 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
     plot_layout(heights = c(1, 10))
   print(final_plot)
 }
+  
+  ###CUTOFF###
+{
+  # (4) Regularized Model - Double LASSO - lambda CV
+  {
+    # Partial out W (confounders) from Y (outcome)
+    fit.lasso.Y <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(Y_train))
+    fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_train), s="lambda.min")
+    Ytilde_corr <- as.matrix(Y_train) - fitted.lasso.Y
+    
+    # Partial out w(confounders) from D(Party Affiliation)
+    fit.lasso.D <- cv.glmnet(x=as.matrix(W_train), y=as.matrix(D_train))
+    fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_train), s="lambda.min")
+    Dtilde_corr <- as.matrix(D_train) - fitted.lasso.D
+    
+    # Run OLS of Ytilde on Dtilde
+    fit.doubleLASSO <- lm(Ytilde_corr ~ Dtilde_corr)
+    beta1hat <- coef(fit.doubleLASSO)[2]
+    print(beta1hat)
+  }
+  
+  # (5) Regularized Model - Tree-based
+      # First estimate propensity scores
+      #propensity.forest <- regression_forest(X_forest, W)
+  {
+    test.forest <- causal_forest(as.matrix(W_train), as.matrix(Y_train), 
+                                 as.matrix(D_train), tune.parameters = "all")
+    
+    # Calculate the ATE:
+    average_treatment_effect(test.forest)
+    
+    # The function best_linear_projection returns estimates of the linear relation between
+    # the (conditional) ATE and the covariates. While we have no reason to assume that
+    # the relation is linear, it presents a good first step to investigate if heterogeneity
+    # is present and which variables appear to drive it.
+    blp <- best_linear_projection(test.forest, as.matrix(W_train))
+    blp
+  }
+  
+}
 
-# Estimation of Heterogeneity
+
+# 3 Estimation of Heterogeneity
 {
   # Extract non-zero coefficients from Regularizing models
   {
@@ -499,7 +505,7 @@ theme_update(plot.subtitle = element_text(hjust = 0.5))
 }
 ```
 
-# Instrumental Variable
+# 4 Instrumental Variable
 ```{r Instrumental Variable}
 # Normal IV (OLS does not work because too many variables due to all words contained), hence no residuals
 
