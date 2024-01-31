@@ -549,7 +549,7 @@ print(final_plot)
   ZW_full$p.hat <- propensity.hat$predictions
 }
 
-# Extract non-zero coefficients from Regularizing models - retrieve in total 519 words
+# Extract non-zero coefficients from Regularizing models - retrieve in total 354 words
 {
   # (2) LASSO - lambda = 0.1 - retrieves 923 variables - NOT APPLIED see FITS
   {
@@ -593,17 +593,62 @@ print(final_plot)
 
 ## 2.2 Estimate Party Affiliation effect on Outcome Variables
 ```{r MLestimation}
-# Double LASSO
+# Filter data on relevant words only
+{
+  pppW <- W_full %>% select(starts_with("."), all_of(words_hetero))
+}
+# Double LASSO with all units of observation but only selected words
+{
+  # Partial out W (confounders) from Y (outcome)
+    fit.lasso.Yfull <- cv.glmnet(x=as.matrix(pppW), y=as.matrix(Y_full))
+    fitted.lasso.Yfull <- predict(fit.lasso.Yfull, newx=as.matrix(pppW), s="lambda.min")
+    Ytilde.full <- as.matrix(Y_full) - fitted.lasso.Yfull
+    
+    # Partial out w(confounders) from D(Party Affiliation)
+    fit.lasso.Dfull <- cv.glmnet(x=as.matrix(pppW), y=as.matrix(D_full))
+    fitted.lasso.Dfull <- predict(fit.lasso.Dfull, newx=as.matrix(pppW), s="lambda.min")
+    Dtilde.full <- as.matrix(D_full) - fitted.lasso.Dfull
+    
+    # Run OLS of Ytilde on Dtilde
+    fit.doubleLASSO.full <- lm(Ytilde.full ~ Dtilde.full)
+    beta1hat.full <- coef(fit.doubleLASSO)[2]
+    print(beta1hat.full)
+}
 
 # Causal Forest
+{
+  fit.forest <- causal_forest(as.matrix(pppW), as.matrix(Y_full), 
+                                 as.matrix(D_full), tune.parameters = "all")
+  
+  # Calculate the ATE:
+    average_treatment_effect(fit.forest)
+    
+    # The function best_linear_projection returns estimates of the linear relation between
+    # the (conditional) ATE and the covariates. While we have no reason to assume that
+    # the relation is linear, it presents a good first step to investigate if heterogeneity
+    # is present and which variables appear to drive it.
+    blp <- best_linear_projection(fit.forest, as.matrix(W_full))
+    blp
+}
 ```
 
 ## 2.3 Explore Heterogeneity
 ```{r heterogeneityestimation}
-# Create interaction terms
+# Create interaction term - TO BE ADAPTED
+{
+  # Create  Interaction terms of .partydummy with all ppx
+  pppx <- X_train %>% select(starts_with("."), all_of(words_hetero))
+  pppx_interacted <- cbind(D_full, pppW) %>% 
+    mutate(across(everything(), ~ . * .partydummy, .names = ".partydummyx{.col}")) %>%
+    select(where(~ var(.) != 0)) # drop all columns where there is no variation
+}
 
 # Double LASSO
 # OLS estimation of residuals is not inherently robust to treatment effect heterogeneity
+{
+  column_indices <- grep("^\\.party", colnames(pppx_interacted))
+  ppptestDL <- rlassoEffects(x=pppx_interacted, y=Y_full, index= column_indices)
+}
 
 # Causal Forest
 
