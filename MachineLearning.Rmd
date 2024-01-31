@@ -654,13 +654,13 @@ index_interact <- grep("^\\.party", colnames(X_interact))
                                               y=Y_full,
                                               index=index_interact,
                                               method='partialling out')
-  fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
+  fit.doubleLASSO.inter.inc <- rlassoEffects(x=X_interact,
                                               y=Y_full_inc,
                                               index=index_interact,
                                               method='partialling out')
   
   save(fit.doubleLASSO.inter.corr, file = "fit.doubleLASSO.inter.corr.RData")
-  save(fit.doubleLASSO.inter.corr, file = "fit.doubleLASSO.inter.corr.RData")
+  save(fit.doubleLASSO.inter.inc, file = "fit.doubleLASSO.inter.inc.RData")
 }
 
 # Causal Forest
