@@ -200,7 +200,7 @@ rm(sentiment_dict)
   # Set a seed to reconstruct analyses
   set.seed(12345)
   # Define variables
-  y_var <- '.corrindex' # Choose between '.corrindex' or '.logincome'
+  y_var <- '.logincome' # Choose between '.corrindex' or '.logincome'
   word_type <- '.word' # Choose between '.word' or '.stem'
 
   # pick the words to keep as predictors
@@ -491,7 +491,7 @@ set.seed(12345)
                            aes(x = DLpred_corrindex,
                                y = .corrindex)) +
         geom_point() +
-      geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "blue") +
+      geom_abline(intercept = 0, slope = 1, size = 0.5) +
       labs(x = "Predicted Corrindex", y = "Actual Corrindex")
   
     # Plotting for Double LASSO - Out-of-sample (test set)
