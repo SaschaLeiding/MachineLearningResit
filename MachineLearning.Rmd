@@ -595,40 +595,40 @@ print(final_plot)
 ```{r MLestimation}
 # Filter data on relevant words only
 {
-  pppW <- W_full %>% select(starts_with("."), all_of(words_hetero))
+  W_selec <- W_full %>% select(starts_with("."), all_of(words_hetero))
 }
 # Double LASSO with all units of observation but only selected words
 {
   # Partial out W (confounders) from Y (outcome)
-    fit.lasso.Yfull <- cv.glmnet(x=as.matrix(pppW), y=as.matrix(Y_full))
-    fitted.lasso.Yfull <- predict(fit.lasso.Yfull, newx=as.matrix(pppW), s="lambda.min")
-    Ytilde.full <- as.matrix(Y_full) - fitted.lasso.Yfull
+  fit.lasso.Y.selec <- cv.glmnet(x=as.matrix(W_selec), y=as.matrix(Y_full))
+  fitted.lasso.Y.selec <- predict(fit.lasso.Y.selec, newx=as.matrix(W_selec), s="lambda.min")
+  Ytilde.selec <- as.matrix(Y_full) - fitted.lasso.Y.selec
     
-    # Partial out w(confounders) from D(Party Affiliation)
-    fit.lasso.Dfull <- cv.glmnet(x=as.matrix(pppW), y=as.matrix(D_full))
-    fitted.lasso.Dfull <- predict(fit.lasso.Dfull, newx=as.matrix(pppW), s="lambda.min")
-    Dtilde.full <- as.matrix(D_full) - fitted.lasso.Dfull
+  # Partial out w(confounders) from D(Party Affiliation)
+  fit.lasso.D.selec <- cv.glmnet(x=as.matrix(W_selec), y=as.matrix(D_full))
+  fitted.lasso.D.selec <- predict(fit.lasso.D.selec, newx=as.matrix(W_selec), s="lambda.min")
+  Dtilde.selec<- as.matrix(D_full) - fitted.lasso.D.selec
     
-    # Run OLS of Ytilde on Dtilde
-    fit.doubleLASSO.full <- lm(Ytilde.full ~ Dtilde.full)
-    beta1hat.full <- coef(fit.doubleLASSO)[2]
-    print(beta1hat.full)
+  # Run OLS of Ytilde on Dtilde
+  fit.doubleLASSO.selec <- lm(Ytilde.selec ~ Dtilde.selec)
+  beta1hat.selec <- coef(fit.doubleLASSO.selec)[2]
+  print(beta1hat.selec)
 }
 
-# Causal Forest
+# Causal Forest with all units of observation but only selected words
 {
-  fit.forest <- causal_forest(as.matrix(pppW), as.matrix(Y_full), 
+  fit.forest.selec <- causal_forest(as.matrix(W_selec), as.matrix(Y_full), 
                                  as.matrix(D_full), tune.parameters = "all")
   
   # Calculate the ATE:
-    average_treatment_effect(fit.forest)
+  average_treatment_effect(fit.forest.selec)
     
-    # The function best_linear_projection returns estimates of the linear relation between
-    # the (conditional) ATE and the covariates. While we have no reason to assume that
-    # the relation is linear, it presents a good first step to investigate if heterogeneity
-    # is present and which variables appear to drive it.
-    blp <- best_linear_projection(fit.forest, as.matrix(W_full))
-    blp
+  # The function best_linear_projection returns estimates of the linear relation between
+  # the (conditional) ATE and the covariates. While we have no reason to assume that
+  # the relation is linear, it presents a good first step to investigate if heterogeneity
+  # is present and which variables appear to drive it.
+  blp.selec <- best_linear_projection(fit.forest.selec, as.matrix(W_selec))
+  blp.selec
 }
 ```
 
@@ -636,81 +636,41 @@ print(final_plot)
 ```{r heterogeneityestimation}
 # Create interaction term - TO BE ADAPTED
 {
-  # Create  Interaction terms of .partydummy with all ppx
-  pppx <- X_train %>% select(starts_with("."), all_of(words_hetero))
-  pppx_interacted <- cbind(D_full, pppW) %>% 
+  # Create  Interaction terms of .partydummy with all previously identified covariates
+  D_interact <- cbind(D_full, W_selec) %>%
     mutate(across(everything(), ~ . * .partydummy, .names = ".partydummyx{.col}")) %>%
-    select(where(~ var(.) != 0)) # drop all columns where there is no variation
+    select(where(~ var(.) != 0) & starts_with(".party")) %>%
+    select(!.partydummyx.partydummy)
+  X_interact <- cbind(D_interact, W_selec)
 }
 
+Y_full_inc <- tidy_speech[".logincome"] # Outcome Variable
+index_interact <- grep("^\\.party", colnames(X_interact))
+
 # Double LASSO
-# OLS estimation of residuals is not inherently robust to treatment effect heterogeneity
+# OLS estimation of residuals  not inherently robust to treatment effect heterogeneity
 {
-  column_indices <- grep("^\\.party", colnames(pppx_interacted))
-  ppptestDL <- rlassoEffects(x=pppx_interacted, y=Y_full, index= column_indices)
+  fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
+                                              y=Y_full,
+                                              index=index_interact,
+                                              method='partialling out')
+  fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
+                                              y=Y_full_inc,
+                                              index=index_interact,
+                                              method='partialling out')
+  
+  save(fit.doubleLASSO.inter.corr, file = "fit.doubleLASSO.inter.corr.RData")
+  save(fit.doubleLASSO.inter.corr, file = "fit.doubleLASSO.inter.corr.RData")
 }
 
 # Causal Forest
+{
+
+}
 
 # Show CATE by birthplace & Age0 for both outcome variables
 ```
 
-```{r speechanalysis}
-# Set a seed to reconstruct analyses
-set.seed(12345)
-
-# 2.2 Estimate Effect of Party Affiliation on .corrindex and .logincome
-{
-  # Double LASSO - CV
-  {
-    # Partial out W (confounders) from Y (outcome)
-    fit.lasso.Y <- cv.glmnet(x=as.matrix(W_full), y=as.matrix(Y_full))
-    fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_full), s="lambda.min")
-    Ytilde_corr <- as.matrix(Y_full) - fitted.lasso.Y
-    
-    # Partial out w(confounders) from D(Party Affiliation)
-    fit.lasso.D <- cv.glmnet(x=as.matrix(W_full), y=as.matrix(D_full))
-    fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_full), s="lambda.min")
-    Dtilde_corr <- as.matrix(D_full) - fitted.lasso.D
-    
-    # Run OLS of Ytilde on Dtilde
-    fit.doubleLASSO <- lm(Ytilde_corr ~ Dtilde_corr)
-    beta1hat <- coef(fit.doubleLASSO)[2]
-    print(beta1hat)
-  }
-  
-  # Causal Forest
-  {
-    set.seed(12345)
-    fit.forest <- causal_forest(as.matrix(W_full), as.matrix(Y_full), 
-                                 as.matrix(D_full), tune.parameters = "all")
-    
-    # Calculate the ATE:
-    average_treatment_effect(fit.forest)
-    
-    # The function best_linear_projection returns estimates of the linear relation between
-    # the (conditional) ATE and the covariates. While we have no reason to assume that
-    # the relation is linear, it presents a good first step to investigate if heterogeneity
-    # is present and which variables appear to drive it.
-    blp <- best_linear_projection(fit.forest, as.matrix(W_full))
-    blp
-  }
-}
-
-
-# 3 Estimation of Heterogeneity
-{
-  # Create  Interaction terms of .partydummy with all ppx
-  pppx <- X_train %>% select(starts_with("."), all_of(words_hetero))
-  pppx_interacted <- pppx %>% 
-    mutate(across(everything(), ~ . * .partydummy, .names = ".partydummyx{.col}")) %>%
-    select(where(~ var(.) != 0)) # drop all columns where there is no variation
-
-  pppt <- rlassoEffects(x = (X_train %>% 
-                               select(starts_with("."), all_of(words_hetero))),
-                         y = Y_train)
-}
-```
 
 # 4 Instrumental Variable
 ```{r Instrumental Variable}
