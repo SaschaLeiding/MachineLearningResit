@@ -53,14 +53,8 @@ output: word_document
     mutate(.corrupt = ifelse(.corrindex > 0, 1, 0), # Dummy whether more or less corrupt than the avg. politician
            .number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
            .number_words = str_count(.allspeeches, " ") + 1, # Count total number of words
-           #.speechlength = .number_words/.number_speeches, # calc. avg. length of speech
            .partydummy = ifelse(.party == "B", 1, 0), # Transform to dummy for processing power
-           .logincome = log(.income)) %>% # Transform income into log
-    group_by(.birthplace) %>%
-    # ASSUMPTION: all politicians within a birthplace are included in the data, or distribution and choice of entries are representative for a region
-    mutate(.regionideology = sum(.party == 'A') - sum(.party == 'B'), # Identify Ideological tendency for each region
-           .regionintensity = 1 - sum(.party == ifelse(sum(.party == 'A') > sum(.party == 'B'), 'A', 'B')) / n())  %>% # Identify the more prevalent party and calculate the ratio
-    ungroup()
+           .logincome = log(.income))# Transform income into log
   
   # Transform Categorical variables to dummies, as transformation to as.factor() needs to much processing
   for (i in 1:21) {
@@ -195,7 +189,6 @@ rm(sentiment_dict)
   # Set a seed to reconstruct analyses
   set.seed(12345)
   # Define variables
-  y_var <- '.logincome' # Choose between '.corrindex' or '.logincome'
   word_type <- '.word' # Choose between '.word' or '.stem'
 
   # pick the words to keep as predictors
@@ -241,22 +234,6 @@ rm(sentiment_dict)
       select(!c(".allspeeches")) %>%
       right_join(tidy_speech, by = '.speaker') %>%
       ungroup()
-  }
-  
-  # Create train and test sample from data merge with Term Frequency
-  # Too little data for stratification by BIRTHPLACE
-  {
-    # split sample into training and test sample
-    data_split <- initial_split(tidy_speech, prop = 0.8) # split into 80% training and 20% test
-    
-    train <- training(data_split)
-    test <- testing(data_split)
-  }
-  
-  # Remove dataset and clear memory for computation
-  {
-    rm(data_split)
-    gc()
   }
 ```
 
@@ -308,7 +285,7 @@ speech_top_terms %>%
 # Derive
 topicsprob10 <- as.data.frame(posterior(topic_model)$topics)# Extract topic probabilities
 colnames(topicsprob10) <- paste0(".topic", 1:ncol(topicsprob10)) # Rename columns
-tidy_speech <- cbind(tidy_speech, topicsprob10)
+#tidy_speech <- cbind(tidy_speech, topicsprob10)
 
 rm(data_unnested)
 rm(words_to_keep)
@@ -319,8 +296,7 @@ rm(words_to_keep)
 ```{r splitdata}
 # Set a seed to reconstruct analyses
 set.seed(12345)
-#y_var <- '.corrindex' # Choose between '.corrindex' or '.logincome'
-# y_var must be same in code-chunk 'prepspeechanalysis'
+y_var <- '.logincome' # Choose between '.corrindex' or '.logincome'
 
 # Create train and test sample
 # Too little data for stratification by BIRTHPLACE
@@ -550,7 +526,7 @@ print(final_plot)
   ZW_full$p.hat <- propensity.hat$predictions
 }
 
-# Extract non-zero coefficients from Regularizing models - retrieve in total 354 words
+# Extract non-zero coefficients from Regularizing models
 {
   # (2) LASSO - lambda = 0.1 - retrieves 923 variables - NOT APPLIED see FITS
   {
@@ -560,7 +536,7 @@ print(final_plot)
   #                         pull(term))
   }
     
-  # (3) LASSO - lambda = CV - retrieves 139 variables
+  # (3) LASSO - lambda = CV
   words_hetero <- append(words_hetero,
                           as.data.frame(
                             as.matrix(
@@ -571,7 +547,7 @@ print(final_plot)
                            filter(s1 != 0 & !grepl("^\\.", term)) %>%
                            pull(term))
 
-  # (4) Double LASSO --- fit.lasso.D; fit.lasso.Y 436 variables
+  # (4) Double LASSO --- fit.lasso.D; fit.lasso.Y
   words_hetero <- append(words_hetero,
                           as.data.frame(as.matrix(coef(fit.lasso.D, s = "lambda.min"))) %>%
                            tibble::rownames_to_column(var = "term") %>%
@@ -594,11 +570,28 @@ print(final_plot)
 
 ## 2.2 Estimate Party Affiliation effect on Outcome Variables
 ```{r MLestimation}
+estbeta1.hat <- rep(NA, 4)
+sebeta1.hat <- rep(NA, 4)
+
 # Filter data on relevant words only
 {
   W_selec <- W_full %>% select(starts_with("."), all_of(words_hetero))
+  
+  # Create interaction term - TO BE ADAPTED
+  {
+    # Create  Interaction terms of .partydummy with all previously identified covariates
+    D_interact <- cbind(D_full, W_selec) %>%
+      mutate(across(everything(), ~ . * .partydummy, .names = ".partydummyx{.col}")) %>%
+      select(where(~ var(.) != 0) & starts_with(".party")) %>%
+      select(!.partydummyx.partydummy)
+    X_interact <- cbind(D_interact, W_selec)
+  }
+  
+  Y_full_inc <- tidy_speech[".corrindex"] # Outcome Variable
+  index_interact <- grep("^\\.party", colnames(X_interact))
 }
-# Double LASSO with all units of observation but only selected words
+
+# Double LASSO with all units of observation but only selected words - NO HETERO
 {
   # Partial out W (confounders) from Y (outcome)
   fit.lasso.Y.selec <- cv.glmnet(x=as.matrix(W_selec), y=as.matrix(Y_full))
@@ -613,42 +606,13 @@ print(final_plot)
   # Run OLS of Ytilde on Dtilde
   fit.doubleLASSO.selec <- lm(Ytilde.selec ~ Dtilde.selec)
   beta1hat.selec <- coef(fit.doubleLASSO.selec)[2]
-  print(beta1hat.selec)
-}
-
-# Causal Forest with all units of observation but only selected words
-{
-  fit.forest.selec <- causal_forest(as.matrix(W_selec), as.matrix(Y_full), 
-                                 as.matrix(D_full), tune.parameters = "all")
   
-  # Calculate the ATE:
-  average_treatment_effect(fit.forest.selec)
-    
-  # The function best_linear_projection returns estimates of the linear relation between
-  # the (conditional) ATE and the covariates. While we have no reason to assume that
-  # the relation is linear, it presents a good first step to investigate if heterogeneity
-  # is present and which variables appear to drive it.
-  blp.selec <- best_linear_projection(fit.forest.selec, as.matrix(W_selec))
-  blp.selec
-}
-```
-
-## 2.3 Explore Heterogeneity
-```{r heterogeneityestimation}
-# Create interaction term - TO BE ADAPTED
-{
-  # Create  Interaction terms of .partydummy with all previously identified covariates
-  D_interact <- cbind(D_full, W_selec) %>%
-    mutate(across(everything(), ~ . * .partydummy, .names = ".partydummyx{.col}")) %>%
-    select(where(~ var(.) != 0) & starts_with(".party")) %>%
-    select(!.partydummyx.partydummy)
-  X_interact <- cbind(D_interact, W_selec)
+  # Extract estimate adn standard error
+  estbeta1.hat[1] <- beta1hat.selec
+  sebeta1.hat[1] <- summary(fit.doubleLASSO.selec)$coefficients["Dtilde.selec", "Std. Error"]
 }
 
-Y_full_inc <- tidy_speech[".corrindex"] # Outcome Variable
-index_interact <- grep("^\\.party", colnames(X_interact))
-
-# Double LASSO
+# Double LASSO with all units of observation but only selected words - HETEROGENITY
 # OLS estimation of residuals  not inherently robust to treatment effect heterogeneity
 {
   fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
@@ -664,6 +628,26 @@ index_interact <- grep("^\\.party", colnames(X_interact))
   save(fit.doubleLASSO.inter.inc, file = "fit.doubleLASSO.inter.inc.RData")
 }
 
+# Causal Forest with all units of observation but only selected words
+{
+  fit.forest.selec <- causal_forest(as.matrix(W_selec), as.matrix(Y_full), 
+                                 as.matrix(D_full), tune.parameters = "all")
+  
+  # Calculate the ATE:
+  estbeta1.hat[1] <- average_treatment_effect(fit.forest.selec)[1]
+  sebeta1.hat[1] <- average_treatment_effect(fit.forest.selec)[1]
+    
+  # The function best_linear_projection returns estimates of the linear relation between
+  # the (conditional) ATE and the covariates. While we have no reason to assume that
+  # the relation is linear, it presents a good first step to investigate if heterogeneity
+  # is present and which variables appear to drive it.
+  blp.selec <- best_linear_projection(fit.forest.selec, as.matrix(W_selec))
+  blp.selec
+}
+```
+
+## 2.3 Explore Heterogeneity
+```{r heterogeneityestimation}
 # Show CATE by birthplace & Age0 for both outcome variables
 ```
 
