@@ -5,11 +5,6 @@ date: "`r Sys.Date()`"
 output: word_document
 ---
 
-# Strategy and To-Dos
-
-Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN Done (i) .number_speeches = How Vocal is politician Done (ii) .speechlength = avg. length of speech (iii) generality = how many basic terms per speech (iv) content = TOPIC MODELLING by various indizes -\> may need to transform numerical corrindex and income into categorical
-
-
 # Install & Load Packages
 ```{r packages}
   #install.packages("tidyverse")
@@ -58,7 +53,7 @@ Prior need to analyse ALLSPEECHES for TYPE OF POLITICIAN Done (i) .number_speech
     mutate(.corrupt = ifelse(.corrindex > 0, 1, 0), # Dummy whether more or less corrupt than the avg. politician
            .number_speeches = str_count(.allspeeches, "\\t House of Commons Hansard Debates for ") + 1, # create variable with number of speeches per speaker in variable 'allspeeches'
            .number_words = str_count(.allspeeches, " ") + 1, # Count total number of words
-           .speechlength = .number_words/.number_speeches, # calc. avg. length of speech
+           #.speechlength = .number_words/.number_speeches, # calc. avg. length of speech
            .partydummy = ifelse(.party == "B", 1, 0), # Transform to dummy for processing power
            .logincome = log(.income)) %>% # Transform income into log
     group_by(.birthplace) %>%
@@ -431,16 +426,18 @@ set.seed(12345)
 
       # Plotting for cv.glmnet
       plot_in_sample <- ggplot(data = (train %>% bind_cols(predict_in_sample)),
-                               aes(x = lambda.min, y = .corrindex)) +
+                               aes(x = lambda.min, y = .logincome, color = .party, group = .party)) +
         geom_point() +
         geom_abline(intercept = 0, slope = 1, size = 0.5) +
-        labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+        labs(x = "Predicted logincome", y = "Actual logincome") +
+        theme(legend.position="none")
       
       plot_out_sample <- ggplot(data = (test %>% bind_cols(predict_out_sample)),
-                              aes(x = lambda.min, y = .corrindex)) +  
+                              aes(x = lambda.min, y = .logincome, color = .party, group = .party)) +  
         geom_point() +
         geom_abline(intercept = 0, slope = 1, size = 0.5) +
-        labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+        labs(x = "Predicted logincome", y = "Actual logincome")+
+        theme(legend.position="none")
       } else {
         # For other models
         predict_in_sample <- predict(model, X_train)
@@ -448,16 +445,18 @@ set.seed(12345)
         
         # Common code for plotting fits
         plot_in_sample <- ggplot(data = (train %>% bind_cols(predict_in_sample)),
-                                 aes(x = .pred, y = .corrindex)) +
+                                 aes(x = .pred, y = .logincome, color = .party, group = .party)) +
           geom_point() +
           geom_abline(intercept = 0, slope = 1, size = 0.5) +
-          labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+          labs(x = "Predicted logincome", y = "Actual logincome") +
+          theme(legend.position="none")
         
         plot_out_sample <- ggplot(data = (test %>% bind_cols(predict_out_sample)),
-                                  aes(x = .pred, y = .corrindex)) +
+                                  aes(x = .pred, y = .logincome, color = .party, group = .party)) +
           geom_point() +
           geom_abline(intercept = 0, slope = 1, size = 0.5) +
-          labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+          labs(x = "Predicted logincome", y = "Actual logincome") +
+          theme(legend.position="none")
         }
     
     # Store combined in-sample and out-of-sample plots
@@ -483,24 +482,26 @@ set.seed(12345)
     # Step 2: Plot in/-out of sample Fits
     {
       # Adding the fitted values from the Double LASSO to the train and test datasets
-      train$DLpred_corrindex <- fitted.lasso.Y + fit.doubleLASSO$fitted.values
-      test$DLpred_corrindex <- fitted.lasso.Y.test + fit.doubleLASSO.test$fitted.values
+      train$DLpred_logincome <- fitted.lasso.Y + fit.doubleLASSO$fitted.values
+      test$DLpred_logincome <- fitted.lasso.Y.test + fit.doubleLASSO.test$fitted.values
       
       # Plotting for Double LASSO - In-sample (training set)
       plot_in_sample <- ggplot(train, 
-                           aes(x = DLpred_corrindex,
-                               y = .corrindex)) +
+                           aes(x = DLpred_logincome,
+                               y = .logincome, color = .party, group = .party)) +
         geom_point() +
       geom_abline(intercept = 0, slope = 1, size = 0.5) +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+      labs(x = "Predicted logincome", y = "Actual logincome") +
+      theme(legend.position="none")
   
     # Plotting for Double LASSO - Out-of-sample (test set)
     plot_out_sample <- ggplot(test, 
-                            aes(x = DLpred_corrindex,
-                                y = .corrindex)) +
+                            aes(x = DLpred_logincome,
+                                y = .logincome, color = .party, group = .party)) +
       geom_point() +
-      geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "blue") +
-      labs(x = "Predicted Corrindex", y = "Actual Corrindex")
+      geom_abline(intercept = 0, slope = 1, size = 0.5) +
+      labs(x = "Predicted logincome", y = "Actual logincome") +
+      theme(legend.position="none")
     }
     
     # Step 3: Save plots in list
@@ -644,7 +645,7 @@ print(final_plot)
   X_interact <- cbind(D_interact, W_selec)
 }
 
-Y_full_inc <- tidy_speech[".logincome"] # Outcome Variable
+Y_full_inc <- tidy_speech[".corrindex"] # Outcome Variable
 index_interact <- grep("^\\.party", colnames(X_interact))
 
 # Double LASSO
@@ -663,18 +664,26 @@ index_interact <- grep("^\\.party", colnames(X_interact))
   save(fit.doubleLASSO.inter.inc, file = "fit.doubleLASSO.inter.inc.RData")
 }
 
-# Causal Forest
-{
-
-}
-
 # Show CATE by birthplace & Age0 for both outcome variables
 ```
 
 
-# 4 Instrumental Variable
+# 3 Instrumental Variable
 ```{r Instrumental Variable}
 # Normal IV (OLS does not work because too many variables due to all words contained), hence no residuals
+predictor_names <- gsub("[^[:alnum:] ]", "", c(colnames(Z_full), colnames(W_selec)))
+formula.fs <- reformulate(predictor_names, response = "partydummy")
+ZW <- cbind(Z_full, W_selec)
+colnames(ZW) <- predictor_names
+pppx <- cbind((D_full %>% rename("partydummy" = ".partydummy")), ZW)
+
+first_stage_model <- lm(formula.fs, data = pppx)
+first_stage_fstat <- summary(first_stage_model)$fstatistic
+
+# Calculate the F-statistic value
+fstat_value <- (first_stage_fstat[1] / first_stage_fstat[2])
+print(paste("F-statistic:", fstat_value))
+
 
 #Quadruple LASSO IV - because instrument is multinomial
 {
