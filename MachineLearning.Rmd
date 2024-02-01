@@ -18,6 +18,7 @@ output: word_document
   #install.packages("grf")
   #install.packages("topicmodels")
   #install.packages("SnowballC")
+  #install.packages("xtable")
 
   library(tidyverse)
   library(tidytext)
@@ -30,7 +31,7 @@ output: word_document
   library(grf)
   library(topicmodels)
   library(SnowballC)
-
+  library(xtable)
 ```
 
 # Load Data
@@ -114,17 +115,22 @@ summary(data)
                                   aes(x = .logincome, color = .party, group = .party)) +
       geom_density(linewidth = 1) +
       labs(x = "Income",
-           y = "Density")
-    print(plot_density_income)
+           y = "Density") +
+      theme(legend.position = "none")
     
     
     plot_density_corr <- ggplot(data = data,
                                 aes(x = .corrindex, color = .party, group = .party)) +
       geom_density(linewidth = 1) +
       labs(x = "Corruption Index",
-           y = "Density")
-    print(plot_density_corr)
+           y = "Density") +
+      theme(legend.position = "none")
   }
+  
+  # Combine Density plots
+  density_plots <- plot_density_income + plot_density_corr +
+    theme(legend.position = c(0.85, 0.85))
+  print(density_plots)
 ```
 
 # Sentiment
@@ -176,12 +182,9 @@ rm(sentiment_dict)
                                             ".party", ".allspeeches", ".birthplace", ".sentiment"))) # Derived variables
     
     # Create linear regression models for corruption index and income
-    basemodel_corr <- lm((reformulate(independent_var, response =".corrindex")), data = data)
-    basemodel_income <- lm((reformulate(independent_var, response =".logincome")), data = data)
-    
-    # Pritn out results of simple regression models
-    summary(basemodel_corr) # If party=1, thus B, .corrindex drops by 0.1989 at 0.001% significance level
-    summary(basemodel_income)
+    summary((lm((reformulate(independent_var, response =".corrindex")), data = data)))
+    summary((lm((reformulate(independent_var, response =".logincome")), data = data)))
+    # If party=1, thus B, .corrindex drops by 0.1989 at 0.001% significance level
 ```
 
 # Prepare Speech Analysis
@@ -285,7 +288,8 @@ speech_top_terms %>%
 # Derive
 topicsprob10 <- as.data.frame(posterior(topic_model)$topics)# Extract topic probabilities
 colnames(topicsprob10) <- paste0(".topic", 1:ncol(topicsprob10)) # Rename columns
-#tidy_speech <- cbind(tidy_speech, topicsprob10)
+tidy_speech_topic <- cbind(tidy_speech, topicsprob10) %>% 
+  select(starts_with("."))
 
 rm(data_unnested)
 rm(words_to_keep)
@@ -334,6 +338,10 @@ y_var <- '.logincome' # Choose between '.corrindex' or '.logincome'
   D_full <- tidy_speech['.partydummy'] # Target Parameter
   Z_full <- tidy_speech %>% select(starts_with(".birthplace") & !(".birthplace")) # Instrument
   X_full <- cbind(D_full, Z_full, W_full) # Observed Regressors - 16,635 variables
+  
+  # Full Topic Data
+  W_full_topic <- tidy_speech_topic[, !(colnames(tidy_speech_topic) %in% confounder_names)] # Covariates - Nuisance Parameters
+  X_full_topic <- cbind(D_full, Z_full, W_full_topic) # Observed Regressors - 16,635 variables
   
   # Other
   simplemodels_list <- list() # List containing models
@@ -523,7 +531,7 @@ print(final_plot)
   plot_hist_propensity <- hist(propensity.hat[, "predictions"], 
                                main = "Estimate of propensity score distribution", 
                                xlab = "Propensity score")
-  ZW_full$p.hat <- propensity.hat$predictions
+  ZW_full$.p.hat <- propensity.hat$predictions
 }
 
 # Extract non-zero coefficients from Regularizing models
@@ -568,14 +576,15 @@ print(final_plot)
 }
 ```
 
-## 2.2 Estimate Party Affiliation effect on Outcome Variables
+## 2.2a Estimate Party Affiliation effect on Outcome Variables - Document-Term
 ```{r MLestimation}
+set.seed(12345)
 estbeta1.hat <- rep(NA, 4)
 sebeta1.hat <- rep(NA, 4)
 
 # Filter data on relevant words only
 {
-  W_selec <- W_full %>% select(starts_with("."), all_of(words_hetero))
+  W_selec <- cbind(W_full,Z_full) %>% select(starts_with("."), all_of(words_hetero))
   
   # Create interaction term - TO BE ADAPTED
   {
@@ -621,14 +630,14 @@ sebeta1.hat <- rep(NA, 4)
   }
   
   # Heterogeneity for Logincome with selected words
-  fit.doubleLASSO.inter.inc <- rlassoEffects(x=X_interact,
-                                             y=tidy_speech$.logincome,
-                                             index=index_interact,
-                                             method='partialling out')
-  fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
-                                             y=tidy_speech$.corrindex,
-                                             index=index_interact,
-                                             method='partialling out')
+#  fit.doubleLASSO.inter.inc <- rlassoEffects(x=X_interact,
+#                                             y=tidy_speech$.logincome,
+#                                             index=index_interact,
+#                                             method='partialling out')
+#  fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
+#                                             y=tidy_speech$.corrindex,
+#                                             index=index_interact,
+#                                             method='partialling out')
 
   estbeta1.hat[2] <- summary(fit.doubleLASSO.inter.inc)$coefficients[1]
   sebeta1.hat[2] <- summary(fit.doubleLASSO.inter.inc)[["object"]][["se"]][[1]]
@@ -643,7 +652,9 @@ sebeta1.hat <- rep(NA, 4)
 # Causal Forest with all units of observation but only selected words
 {
   set.seed(12345)
-  fit.forest.selec <- causal_forest(as.matrix(W_selec), as.matrix(Y_full), 
+  W_forest <- W_selec
+  W_forest$.p.hat <- propensity.hat$predictions
+  fit.forest.selec <- causal_forest(as.matrix(W_forest), as.matrix(Y_full), 
                                  as.matrix(D_full), tune.parameters = "all")
   
   # Calculate the ATE:
@@ -654,14 +665,104 @@ sebeta1.hat <- rep(NA, 4)
   # the (conditional) ATE and the covariates. While we have no reason to assume that
   # the relation is linear, it presents a good first step to investigate if heterogeneity
   # is present and which variables appear to drive it.
-  blp.selec <- best_linear_projection(fit.forest.selec, as.matrix(W_selec))
+  blp.selec <- best_linear_projection(fit.forest.selec, as.matrix(W_forest))
   blp.selec
+}
+```
+
+## 2.2b Estimate Party Affiliation effect on Outcome Variables - Topic Model
+```{r MLestimationtopic}
+estbeta1.hat.topic <- rep(NA, 4)
+sebeta1.hat.topic <- rep(NA, 4)
+
+# Filter data on relevant words only
+{
+  # Create interaction term - TO BE ADAPTED
+  {
+    # Create  Interaction terms of .partydummy with all previously identified covariates
+    D_interact_full <- cbind(D_full, Z_full, W_full_topic) %>%
+      mutate(across(everything(), ~ . * .partydummy, .names = ".partydummyx{.col}")) %>%
+      select(where(~ var(.) != 0) & starts_with(".party")) %>%
+      select(!.partydummyx.partydummy)
+    X_interact_full <- cbind(D_interact_full, W_full_topic)
+  }
+  
+  index_interact <- grep("^\\.party", colnames(X_interact_full))
+}
+
+# Double LASSO with all units of observation but only selected words - NO HETERO
+{
+  # Partial out W (confounders) from Y (outcome)
+  fit.lasso.Y.selec <- cv.glmnet(x=as.matrix(W_full_topic), y=as.matrix(Y_full))
+  fitted.lasso.Y.selec <- predict(fit.lasso.Y.selec, newx=as.matrix(W_full_topic), s="lambda.min")
+  Ytilde.selec <- as.matrix(Y_full) - fitted.lasso.Y.selec
+    
+  # Partial out w(confounders) from D(Party Affiliation)
+  fit.lasso.D.selec <- cv.glmnet(x=as.matrix(W_full_topic), y=as.matrix(D_full))
+  fitted.lasso.D.selec <- predict(fit.lasso.D.selec, newx=as.matrix(W_full_topic), s="lambda.min")
+  Dtilde.selec<- as.matrix(D_full) - fitted.lasso.D.selec
+    
+  # Run OLS of Ytilde on Dtilde
+  fit.doubleLASSO.selec <- lm(Ytilde.selec ~ Dtilde.selec)
+  beta1hat.selec <- coef(fit.doubleLASSO.selec)[2]
+  
+  # Extract estimate adn standard error
+  estbeta1.hat.topic[1] <- beta1hat.selec
+  sebeta1.hat.topic[1] <- summary(fit.doubleLASSO.selec)$coefficients["Dtilde.selec", "Std. Error"]
+}
+
+# Double LASSO with all units of observation but only selected words - HETEROGENITY
+# OLS estimation of residuals  not inherently robust to treatment effect heterogeneity
+{
+  #Load data
+  {
+    load("./fit.doubleLASSO.inter.corr.topicRData")
+    load("./fit.doubleLASSO.inter.inc.topicRData")
+  }
+  
+  # Heterogeneity for Logincome with selected words
+#  fit.doubleLASSO.inter.inc.topic <- rlassoEffects(x=X_interact_full,
+#                                             y=tidy_speech$.logincome,
+#                                             index=index_interact,
+#                                             method='partialling out')
+#  fit.doubleLASSO.inter.corr.topic <- rlassoEffects(x=X_interact_full,
+#                                             y=tidy_speech$.corrindex,
+#                                             index=index_interact,
+#                                             method='partialling out')
+
+  estbeta1.hat.topic[2] <- summary(fit.doubleLASSO.inter.inc.topic)$coefficients[1]
+  sebeta1.hat.topic[2] <- summary(fit.doubleLASSO.inter.inc.topic)[["object"]][["se"]][[1]]
+  
+  imp_coeff_inc_topic <- as.data.frame(summary(fit.doubleLASSO.inter.inc.topic)$coefficients) %>% 
+    filter(`Pr(>|t|)` <= 0.1)
+  
+  imp_coeff_corr_topic <- as.data.frame(summary(fit.doubleLASSO.inter.corr.topic)$coefficients) %>% 
+    filter(`Pr(>|t|)` <= 0.1)
+}
+
+# Causal Forest with all units of observation but only selected words
+{
+  set.seed(12345)
+  W_forest_topic <- W_full_topic
+  W_forest_topic$.p.hat <- propensity.hat$predictions
+  fit.forest.selec.topic <- causal_forest(as.matrix(W_forest_topic), as.matrix(Y_full), 
+                                 as.matrix(D_full), tune.parameters = "all")
+  
+  # Calculate the ATE:
+  estbeta1.hat.topic[3] <- average_treatment_effect(fit.forest.selec.topic)[1]
+  sebeta1.hat.topic[3] <- average_treatment_effect(fit.forest.selec.topic)[2]
+    
+  # The function best_linear_projection returns estimates of the linear relation between the (conditional) ATE and the covariates.
+  blp.selec.topic <- best_linear_projection(fit.forest.selec.topic, as.matrix(W_forest_topic))
+  blp.selec.topic
 }
 ```
 
 ## 2.3 Explore Heterogeneity
 ```{r heterogeneityestimation}
-# Show CATE by birthplace & Age0 for both outcome variables
+# Show CATE by birthplace for both outcome variables
+#average_treatment_effect(fit.forest.selec, subset = X)
+
 ```
 
 
@@ -669,6 +770,7 @@ sebeta1.hat <- rep(NA, 4)
 ```{r Instrumental Variable}
 # Test Relevance condition
 {
+  # Test Relevance with Document-Term Matrix
   # Normal IV (OLS does not work because too many variables due to all words contained), hence no residuals
   predictor_names <- gsub("[^[:alnum:] ]", "", c(colnames(Z_full), colnames(W_selec)))
   formula.fs <- reformulate(predictor_names, response = "partydummy")
@@ -682,9 +784,25 @@ sebeta1.hat <- rep(NA, 4)
   # Calculate the F-statistic value
   fstat_value <- (first_stage_fstat[1] / first_stage_fstat[2])
   print(paste("F-statistic:", fstat_value))
+  
+  
+  # Test Relevance with Topic
+  # Normal IV (OLS does not work because too many variables due to all words contained), hence no residuals
+  predictor_names_topic <- gsub("[^[:alnum:] ]", "", c(colnames(Z_full), colnames(W_full_topic)))
+  formula.fs <- reformulate(predictor_names_topic, response = "partydummy")
+  ZW_topic <- cbind(Z_full, W_full_topic)
+  colnames(ZW_topic) <- predictor_names_topic
+  
+  fs.topic <- lm(formula.fs,
+                 data = (cbind((D_full %>% rename("partydummy" = ".partydummy")), ZW_topic)))
+  fs.topic_fstat <- summary(fs.topic)$fstatistic
+  
+  # Calculate the F-statistic value
+  fs_fstat_value <- (fs.topic_fstat[1] / fs.topic_fstat[2])
+  print(paste("F-statistic:", fs_fstat_value))
 }
 
-#Quadruple LASSO IV - because instrument is multinomial
+#Quadruple LASSO IV - because instrument is multinomial - Document-Term Matrix
 {
   set.seed(12345)
   # 1. Use LASSO to predict D with Z AND W
@@ -716,9 +834,72 @@ sebeta1.hat <- rep(NA, 4)
   beta1hat.QDLASSO <- coef.QDLASSO.rf / coef.QDLASSO.fs	# IV coefficient
   estbeta1.hat[4] <- beta1hat.QDLASSO
   sebeta1.hat[4] <- "n/a"
+}
 
+#Quadruple LASSO IV - because instrument is multinomial - Document-Term Matrix
+{
+  set.seed(12345)
+  # 1. Use LASSO to predict D with Z AND W
+  fit.lasso.Dpred <- cv.glmnet(y=as.matrix(D_full), as.matrix((cbind(Z_full, W_full_topic))))
+  fitted.lasso.Dpred <- predict(fit.lasso.Dpred, newx=as.matrix((cbind(Z_full, W_full_topic))), s="lambda.min")
   
+  # 2. Use LASSO to partial out W
+  # (a) partial out W from Y - done above
+  fit.lasso.Y <- cv.glmnet(as.matrix(W_full_topic), as.matrix(Y_full))
+  fitted.lasso.Y <- predict(fit.lasso.Y, newx=as.matrix(W_full_topic), s="lambda.min")
+  Ytilde <- as.matrix(Y_full) - fitted.lasso.Y
+  
+  # (b) partial out W from D - done above
+  fit.lasso.D <- cv.glmnet(as.matrix(W_full_topic), as.matrix(D_full))
+  fitted.lasso.D <- predict(fit.lasso.D, newx=as.matrix(W_full_topic), s="lambda.min")
+  Dtilde <- as.matrix(D_full) - fitted.lasso.D
+  
+  # (c) Partial out W from D_pred from 1.
+  fit.lasso.QDpred <- cv.glmnet(as.matrix(W_full_topic), fitted.lasso.Dpred)
+  fitted.lasso.QDpred <- predict(fit.lasso.QDpred, newx=as.matrix(W_full_topic), s="lambda.min")
+  QDpredtilde <- fitted.lasso.Dpred - fitted.lasso.QDpred
+  
+  # 3. Estimate IV coefficient
+  fit.QDLASSO.rf <- lm(Ytilde ~ QDpredtilde)
+  coef.QDLASSO.rf <- coef(fit.QDLASSO.rf)[2]
+  fit.QDLASSO.fs <- lm(Dtilde~ QDpredtilde)
+  coef.QDLASSO.fs <- coef(fit.QDLASSO.fs)[2]		# first-stage coefficient
+  
+  beta1hat.QDLASSO <- coef.QDLASSO.rf / coef.QDLASSO.fs	# IV coefficient
+  estbeta1.hat.topic[4] <- beta1hat.QDLASSO
+  sebeta1.hat.topic[4] <- "n/a"
 }
 ```
+
+# Analysis Output
+```{r analysisoutput}
+estmodels <- c("Double LASSO", "Double LASSO", "Causal Forest", "Quadruple LASSO")
+estbeta1.hat<- round(estbeta1.hat, digits=3)
+estbeta1.hat.topic <- round(estbeta1.hat.topic, digits=3)
+sebeta1.hat<- round((as.numeric(sebeta1.hat)), digits=3)
+sebeta1.hat.topic <- round((as.numeric(sebeta1.hat.topic)), digits=3)
+
+
+# Creating a data frame to illustrate the structure
+results_beta <- data.frame(
+  Specifications = c("Party B", "", "Speech-Term Matrix", "Topic","IV"),
+  `Double LASSO` = c(estbeta1.hat[1], sebeta1.hat[1], "yes", "no", "no"),
+  `Double LASSO` = c(estbeta1.hat[2], sebeta1.hat[2], "yes", "no", "no"),
+  `Causal Forest` = c(estbeta1.hat[3], sebeta1.hat[3], "yes", "no", "no"),
+  `Quadruple LASSO` = c(estbeta1.hat[4], sebeta1.hat[4], "yes", "no", "yes"),
+  `Double LASSO` = c(estbeta1.hat.topic[1], sebeta1.hat.topic[1], "no", "yes", "no"),
+  `Double LASSO` = c(estbeta1.hat.topic[2], sebeta1.hat.topic[2], "no", "yes", "no"),
+  `Causal Forest` = c(estbeta1.hat.topic[3], sebeta1.hat.topic[3], "no", "yes", "no"),
+  `Quadruple LASSO` = c(estbeta1.hat.topic[4], sebeta1.hat.topic[4], "no", "yes", "yes")
+)
+
+# Ensure the row names are not printed and set table attributes
+latex_table <- xtable(results_beta)
+print(latex_table, include.rownames = FALSE, 
+      caption.placement = "top", booktabs = TRUE,
+      floating = TRUE, table.placement = "ht",
+      sanitize.text.function = function(x) {x})
+```
+
 
 
