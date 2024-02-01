@@ -587,7 +587,6 @@ sebeta1.hat <- rep(NA, 4)
     X_interact <- cbind(D_interact, W_selec)
   }
   
-  Y_full_inc <- tidy_speech[".corrindex"] # Outcome Variable
   index_interact <- grep("^\\.party", colnames(X_interact))
 }
 
@@ -615,27 +614,41 @@ sebeta1.hat <- rep(NA, 4)
 # Double LASSO with all units of observation but only selected words - HETEROGENITY
 # OLS estimation of residuals  not inherently robust to treatment effect heterogeneity
 {
-  fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
-                                              y=Y_full,
-                                              index=index_interact,
-                                              method='partialling out')
-  fit.doubleLASSO.inter.inc <- rlassoEffects(x=X_interact,
-                                              y=Y_full_inc,
-                                              index=index_interact,
-                                              method='partialling out')
+  #Load data
+  {
+    load("./fit.doubleLASSO.inter.corr.RData")
+    load("./fit.doubleLASSO.inter.inc.RData")
+  }
   
-  save(fit.doubleLASSO.inter.corr, file = "fit.doubleLASSO.inter.corr.RData")
-  save(fit.doubleLASSO.inter.inc, file = "fit.doubleLASSO.inter.inc.RData")
+  # Heterogeneity for Logincome with selected words
+  fit.doubleLASSO.inter.inc <- rlassoEffects(x=X_interact,
+                                             y=tidy_speech$.logincome,
+                                             index=index_interact,
+                                             method='partialling out')
+  fit.doubleLASSO.inter.corr <- rlassoEffects(x=X_interact,
+                                             y=tidy_speech$.corrindex,
+                                             index=index_interact,
+                                             method='partialling out')
+
+  estbeta1.hat[2] <- summary(fit.doubleLASSO.inter.inc)$coefficients[1]
+  sebeta1.hat[2] <- summary(fit.doubleLASSO.inter.inc)[["object"]][["se"]][[1]]
+  
+  imp_coeff_inc <- as.data.frame(summary(fit.doubleLASSO.inter.inc)$coefficients) %>% 
+    filter(`Pr(>|t|)` <= 0.1)
+  
+  imp_coeff_corr <- as.data.frame(summary(fit.doubleLASSO.inter.corr)$coefficients) %>% 
+    filter(`Pr(>|t|)` <= 0.1)
 }
 
 # Causal Forest with all units of observation but only selected words
 {
+  set.seed(12345)
   fit.forest.selec <- causal_forest(as.matrix(W_selec), as.matrix(Y_full), 
                                  as.matrix(D_full), tune.parameters = "all")
   
   # Calculate the ATE:
-  estbeta1.hat[1] <- average_treatment_effect(fit.forest.selec)[1]
-  sebeta1.hat[1] <- average_treatment_effect(fit.forest.selec)[1]
+  estbeta1.hat[3] <- average_treatment_effect(fit.forest.selec)[1]
+  sebeta1.hat[3] <- average_treatment_effect(fit.forest.selec)[2]
     
   # The function best_linear_projection returns estimates of the linear relation between
   # the (conditional) ATE and the covariates. While we have no reason to assume that
@@ -701,7 +714,8 @@ sebeta1.hat <- rep(NA, 4)
   coef.QDLASSO.fs <- coef(fit.QDLASSO.fs)[2]		# first-stage coefficient
   
   beta1hat.QDLASSO <- coef.QDLASSO.rf / coef.QDLASSO.fs	# IV coefficient
-  beta1hat.QDLASSO
+  estbeta1.hat[4] <- beta1hat.QDLASSO
+  sebeta1.hat[4] <- "n/a"
 
   
 }
