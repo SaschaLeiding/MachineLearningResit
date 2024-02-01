@@ -246,7 +246,7 @@ Derived topics can be used as proxies for overall speeches, requires less comput
 #save(topic_model, file = "topic_model.RData")
 #save(topic_model_22, file = "topic_model_22.RData")
 
-load("./topic_model.RData")#  contains topic model with 10 topics
+#load("./topic_model.RData")#  contains topic model with 10 topics
 #load("./topic_model_22.RData") # contains topic model with 22 topics
 
 # Some standard words are in every parliamentary speech and not filtered out by 'stopwords'
@@ -264,7 +264,7 @@ speech_dtm <- data_unnested %>%
   cast_dtm(.speaker, .word, n)
 
 # Run LDA
-#topic_model <- LDA(speech_dtm, k=10, control=list(seed = 12345))
+topic_model <- LDA(speech_dtm, k=10, control=list(seed = 12345))
 
 # obtain the topic-specific probability vectors theta_1,...,theta_K
 # (in the LDA output, these are denoted by "beta")
@@ -293,6 +293,16 @@ tidy_speech_topic <- cbind(tidy_speech, topicsprob10) %>%
 
 rm(data_unnested)
 rm(words_to_keep)
+
+plot_topic_1389 <- speech_top_terms %>% 
+  filter(topic == 1 |topic == 3| topic == 8 | topic == 9) %>%
+  group_by(topic) %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+plot_topic_1389
 ``` 
 
 # 2 Conduct Speech Analysis
@@ -300,7 +310,7 @@ rm(words_to_keep)
 ```{r splitdata}
 # Set a seed to reconstruct analyses
 set.seed(12345)
-y_var <- '.logincome' # Choose between '.corrindex' or '.logincome'
+y_var <- '.corrindex' # Choose between '.corrindex' or '.logincome'
 
 # Create train and test sample
 # Too little data for stratification by BIRTHPLACE
@@ -623,10 +633,10 @@ sebeta1.hat <- rep(NA, 4)
 # Double LASSO with all units of observation but only selected words - HETEROGENITY
 # OLS estimation of residuals  not inherently robust to treatment effect heterogeneity
 {
-  #Load data
+  #Load rlassoEffects Fits otherwise new computing could take 1 hour
   {
-    load("./fit.doubleLASSO.inter.corr.RData")
-    load("./fit.doubleLASSO.inter.inc.RData")
+    #load("./fit.doubleLASSO.inter.corr.RData")
+    #load("./fit.doubleLASSO.inter.inc.RData")
   }
   
   # Heterogeneity for Logincome with selected words
@@ -714,10 +724,10 @@ sebeta1.hat.topic <- rep(NA, 4)
 # Double LASSO with all units of observation but only selected words - HETEROGENITY
 # OLS estimation of residuals  not inherently robust to treatment effect heterogeneity
 {
-  #Load data
+  #Load data -- running new every time takes 1 hour
   {
-    load("./fit.doubleLASSO.inter.corr.topicRData")
-    load("./fit.doubleLASSO.inter.inc.topicRData")
+    #load("./fit.doubleLASSO.inter.corr.topicRData")
+    #load("./fit.doubleLASSO.inter.inc.topicRData")
   }
   
   # Heterogeneity for Logincome with selected words
@@ -743,7 +753,7 @@ sebeta1.hat.topic <- rep(NA, 4)
 # Causal Forest with all units of observation but only selected words
 {
   set.seed(12345)
-  W_forest_topic <- W_full_topic
+  W_forest_topic <- cbind(W_full_topic, Z_full)
   W_forest_topic$.p.hat <- propensity.hat$predictions
   fit.forest.selec.topic <- causal_forest(as.matrix(W_forest_topic), as.matrix(Y_full), 
                                  as.matrix(D_full), tune.parameters = "all")
@@ -756,15 +766,8 @@ sebeta1.hat.topic <- rep(NA, 4)
   blp.selec.topic <- best_linear_projection(fit.forest.selec.topic, as.matrix(W_forest_topic))
   blp.selec.topic
 }
-```
-
-## 2.3 Explore Heterogeneity
-```{r heterogeneityestimation}
-# Show CATE by birthplace for both outcome variables
-#average_treatment_effect(fit.forest.selec, subset = X)
 
 ```
-
 
 # 3 Instrumental Variable
 ```{r Instrumental Variable}
@@ -836,7 +839,7 @@ sebeta1.hat.topic <- rep(NA, 4)
   sebeta1.hat[4] <- "n/a"
 }
 
-#Quadruple LASSO IV - because instrument is multinomial - Document-Term Matrix
+#Quadruple LASSO IV - because instrument is multinomial - Topic
 {
   set.seed(12345)
   # 1. Use LASSO to predict D with Z AND W
